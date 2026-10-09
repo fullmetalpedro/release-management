@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Release Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --bg:#f6f6f4; --surface:#fff; --ink:#111214; --muted:#6b6f76; --line:#e6e6e3;
+  --violet:#7c3aed; --amber:#c2620a; --amber-bg:#fff4e0; --red:#d93636; --green:#16a34a; --blue:#2563eb;
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+
+/* deck */
+.deck{position:fixed;inset:0}
+.slide{position:absolute;inset:0;padding:56px 64px 88px;display:flex;opacity:0;visibility:hidden;
+  transform:translateX(40px);transition:opacity .6s var(--ease),transform .6s var(--ease),visibility 0s .6s}
+.slide.prev{transform:translateX(-40px)}
+.slide.active{opacity:1;visibility:visible;transform:none;transition:opacity .6s var(--ease),transform .6s var(--ease)}
+
+/* entrance animations: replay every time a slide becomes active */
+.in{opacity:0}
+.active .in{animation:up .8s var(--ease) forwards;animation-delay:calc(var(--d,0) * 120ms + 150ms)}
+@keyframes up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:scale(.92) translateY(30px)}to{opacity:1;transform:none}}
+@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+
+.kicker{font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.kicker b{color:var(--violet)}
+
+/* cover */
+.cover{flex-direction:column;justify-content:center;gap:28px;
+  background:radial-gradient(1200px 600px at 85% 110%,#ede4ff 0,transparent 60%),radial-gradient(900px 500px at -10% -20%,#fff1dc 0,transparent 60%),var(--bg)}
+.cover h1{font-size:clamp(48px,8vw,112px);font-weight:800;letter-spacing:-.04em;line-height:.95}
+.cover h1 span{color:var(--violet)}
+.cover p{font-size:clamp(18px,1.8vw,24px);color:var(--muted);max-width:720px;line-height:1.45}
+.logos{display:flex;gap:40px;align-items:center;flex-wrap:wrap;margin-top:24px}
+.logos img{height:34px;opacity:0}
+.active .logos img{animation:up .7s var(--ease) forwards}
+.active .logos img:nth-child(1){animation-delay:.9s}
+.active .logos img:nth-child(2){animation-delay:1.05s}
+.active .logos img:nth-child(3){animation-delay:1.2s}
+.underline{height:4px;width:160px;background:var(--violet);border-radius:2px;transform-origin:left;transform:scaleX(0)}
+.active .underline{animation:grow .9s .6s var(--ease) forwards}
+
+/* section divider */
+.section{flex-direction:column;justify-content:center;gap:20px}
+.section .num{font-size:clamp(120px,22vw,280px);font-weight:800;letter-spacing:-.06em;line-height:.8;color:transparent;-webkit-text-stroke:2px var(--line);position:absolute;right:64px;bottom:56px}
+.section h2{font-size:clamp(40px,6vw,80px);font-weight:800;letter-spacing:-.035em;line-height:1;max-width:900px}
+.section p{font-size:clamp(17px,1.6vw,22px);color:var(--muted);max-width:760px;line-height:1.5}
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.chip{font-size:14px;padding:8px 14px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+
+/* step slide */
+.step{gap:56px;align-items:center}
+.caption{flex:0 0 min(30%,400px);display:flex;flex-direction:column;gap:18px}
+.badge{width:56px;height:56px;border-radius:14px;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:22px;font-weight:700}
+.alt .badge{background:var(--red)}
+.tag{align-self:flex-start;font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--red);background:#fde8e8;padding:5px 10px;border-radius:6px}
+.caption h3{font-size:clamp(28px,3vw,42px);font-weight:800;letter-spacing:-.03em;line-height:1.05}
+.caption p{font-size:clamp(15px,1.25vw,18px);line-height:1.6;color:var(--muted)}
+.caption p em{font-style:normal;color:var(--ink);font-weight:600}
+
+.stage{flex:1;min-width:0;display:flex;justify-content:center}
+.browser{width:min(100%,calc((100vh - 200px) * var(--ar)));border-radius:14px;background:var(--surface);
+  box-shadow:0 1px 0 var(--line),0 30px 80px -30px rgba(17,18,20,.35);overflow:hidden;opacity:0}
+.active .browser{animation:pop 1s .2s var(--ease) forwards}
+.chrome{height:34px;display:flex;align-items:center;gap:7px;padding:0 14px;border-bottom:1px solid var(--line);background:#fbfbfa}
+.chrome i{width:10px;height:10px;border-radius:50%;background:#e2e2df}
+.chrome .url{margin-left:14px;font-size:12px;color:var(--muted);background:var(--bg);padding:3px 12px;border-radius:6px}
+.viewport{position:relative;aspect-ratio:var(--ar);overflow:hidden}
+.zoom{position:absolute;inset:0;transform-origin:var(--ox) var(--oy)}
+.active .zoom{animation:zoom 1.4s 2s var(--ease) forwards}
+@keyframes zoom{to{transform:scale(var(--z,1.35))}}
+.zoom img{width:100%;display:block}
+
+/* hotspot ring */
+.ring{position:absolute;left:var(--hx);top:var(--hy);width:var(--hw);height:var(--hh);border-radius:10px;
+  outline:3px solid var(--violet);outline-offset:4px;box-shadow:0 0 0 9999px rgba(17,18,20,0);opacity:0}
+.active .ring{animation:ring 1s 1.7s var(--ease) forwards,pulse 2s 2.7s ease-in-out infinite}
+@keyframes ring{from{opacity:0;outline-offset:24px}to{opacity:1;outline-offset:4px;box-shadow:0 0 0 9999px rgba(17,18,20,.18)}}
+@keyframes pulse{50%{outline-color:rgba(124,58,237,.35);outline-offset:8px}}
+
+/* animated cursor */
+.cursor{position:absolute;left:var(--cx);top:var(--cy);width:26px;height:26px;opacity:0;z-index:3;
+  transform:translate(30vw,40vh);filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
+.active .cursor{animation:move 1.1s .7s var(--ease) forwards,click .3s 1.8s ease-in-out}
+@keyframes move{0%{opacity:0;transform:translate(30vw,40vh)}20%{opacity:1}100%{opacity:1;transform:translate(-4px,-2px)}}
+@keyframes click{50%{scale:.8}}
+.cursor::after{content:"";position:absolute;left:-14px;top:-14px;width:28px;height:28px;border-radius:50%;border:2px solid var(--violet);opacity:0}
+.active .cursor::after{animation:ripple .7s 1.8s ease-out}
+@keyframes ripple{from{opacity:1;transform:scale(.3)}to{opacity:0;transform:scale(2.2)}}
+
+/* components grid */
+.comps{flex-direction:column;gap:28px}
+.comps header{display:flex;flex-direction:column;gap:10px}
+.comps h2{font-size:clamp(30px,3.6vw,48px);font-weight:800;letter-spacing:-.03em}
+.grid{flex:1;min-height:0;display:grid;grid-template-columns:1.25fr 1fr;grid-template-rows:1fr 1fr;gap:20px}
+.grid figure{min-height:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:10px;opacity:0}
+.active .grid figure{animation:pop .9s var(--ease) forwards}
+.active .grid figure:nth-child(1){animation-delay:.3s}
+.active .grid figure:nth-child(2){animation-delay:.45s}
+.active .grid figure:nth-child(3){animation-delay:.6s}
+.active .grid figure:nth-child(4){animation-delay:.75s}
+.grid img{flex:1;min-height:0;width:100%;object-fit:contain;transition:transform .5s var(--ease)}
+.grid figure:hover img{transform:scale(1.04)}
+.grid figcaption{font-size:13px;font-weight:600;color:var(--muted)}
+
+/* end */
+.end{flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:22px}
+.end h2{font-size:clamp(44px,7vw,96px);font-weight:800;letter-spacing:-.04em}
+.end img{height:56px;opacity:0}
+.active.end img{animation:pop .8s var(--ease) forwards}
+
+/* hud */
+.progress{position:fixed;left:0;top:0;height:3px;background:var(--violet);transition:width .6s var(--ease);z-index:10}
+.hud{position:fixed;left:64px;right:64px;bottom:28px;display:flex;align-items:center;gap:16px;z-index:10;font-size:13px;color:var(--muted)}
+.hud .flow{flex:1}
+.hud button{font:inherit;font-size:16px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;height:34px;min-width:34px;padding:0 10px;cursor:pointer}
+.hud button:hover{border-color:var(--ink)}
+.hud button:focus-visible{outline:2px solid var(--violet);outline-offset:2px}
+.counter{font-variant-numeric:tabular-nums}
+
+@media (max-width:900px){
+  .slide{padding:32px 16px 84px;overflow-y:auto}
+  .step{flex-direction:column;align-items:stretch;gap:24px}
+  .caption{flex:none}
+  .browser{width:100%}
+  .grid{grid-template-columns:1fr;grid-template-rows:none}
+  .hud{left:16px;right:16px}
+  .section .num{right:16px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}
+}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<main class="deck" id="deck">
+
+  <section class="slide cover" data-flow="Release Management">
+    <span class="kicker in">Muralis · Design de produto</span>
+    <h1 class="in" style="--d:1">Release<br><span>Management</span></h1>
+    <div class="underline"></div>
+    <p class="in" style="--d:3">Code review e releases de GetNota, LeadComex e Jane em um só lugar — do PR aberto à branch de release publicada.</p>
+    <div class="logos">
+      <img src="getnota-logo.png" alt="GetNota">
+      <img src="leadcomex-logo.png" alt="LeadComex">
+      <img src="jane-logo.png" alt="Jane">
+    </div>
+  </section>
+
+  <section class="slide comps" data-flow="00 · Fundação">
+    <header>
+      <span class="kicker in"><b>00</b> · Fundação</span>
+      <h2 class="in" style="--d:1">Componentes e estados</h2>
+    </header>
+    <div class="grid">
+      <figure><img src="screens/c-pr-card.png" alt="Estados do PR Card"><figcaption>PR Card</figcaption></figure>
+      <figure><img src="screens/c-seletor.png" alt="Seletor de projeto"><figcaption>Seletor de projeto</figcaption></figure>
+      <figure><img src="screens/c-controles.png" alt="Controles"><figcaption>Controles</figcaption></figure>
+      <figure><img src="screens/c-feedback.png" alt="Feedback do sistema"><figcaption>Feedback do sistema</figcaption></figure>
+    </div>
+  </section>
+
+  <template id="step-tpl">
+    <section class="slide step">
+      <div class="caption">
+        <span class="kicker in"></span>
+        <div class="badge in mono" style="--d:1"></div>
+        <span class="tag in" style="--d:1.5" hidden>CAMINHO ALTERNATIVO</span>
+        <h3 class="in" style="--d:2"></h3>
+        <p class="in" style="--d:3"></p>
+      </div>
+      <div class="stage">
+        <div class="browser">
+          <div class="chrome"><i></i><i></i><i></i><span class="url mono"></span></div>
+          <div class="viewport">
+            <div class="zoom"><img alt=""><div class="ring"></div>
+              <svg class="cursor" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 2l16 9-7 2-3 7z" fill="#111214" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <section class="slide end" data-flow="Fim">
+    <img src="muralis-symbol.png" alt="Muralis">
+    <h2 class="in" style="--d:1">Obrigado</h2>
+    <p class="kicker in" style="--d:2">13 passos · 2 fluxos · 6 componentes</p>
+  </section>
+</main>
+
+<nav class="hud" aria-label="Navegação">
+  <span class="flow" id="flow"></span>
+  <span class="counter" id="counter"></span>
+  <button id="play" title="Autoplay (P)" aria-label="Autoplay">▶</button>
+  <button id="back" aria-label="Anterior">←</button>
+  <button id="next" aria-label="Próximo">→</button>
+</nav>
+
+<script>
+// [file, w, h, url, hotspot x,y,w,h (% of screen), title, desc]
+const F1 = "Fluxo 01 · Code review", F2 = "Fluxo 02 · Release management";
+const sections = {
+  1: [F1, "Triagem diária de PRs", "Do primeiro acesso até o board organizado: carregar, trocar de projeto, ajustar colunas e lidar com estados vazios e erros.", ["Carregar", "Trocar projeto", "Ocultar colunas", "Estado vazio", "Erro de sync"]],
+  7: [F2, "Da seleção de PRs à release publicada", "Selecionar PRs mergeados, criar a branch de release, acompanhar o conteúdo dela e garantir que todo PR tenha task vinculada.", ["Release em tela cheia", "Vincular task", "Selecionar mergeados", "Criar branch", "Falha"]]
+};
+const steps = [
+  [2000, 797, "/code-review", [92.5, 18, 6.5, 5.5], "Carregando o board", "Ao abrir, o board busca os PRs no <em>Azure DevOps</em> e no <em>GitHub</em>. Os cards aparecem como skeleton e o botão de sincronizar indica progresso."],
+  [2000, 1129, "/code-review", [1.5, 17.5, 15.5, 80], "Board carregado", "Os PRs são distribuídos nas colunas. <em>“Depende de mim”</em> fica em destaque: PRs em que você é revisor ou que aguardam você como autor."],
+  [2000, 1129, "/code-review", [1.5, 7, 12.5, 19.5], "Trocar de projeto", "O seletor no topo alterna o contexto entre <em>GetNota</em>, <em>LeadComex</em> e <em>Jane</em>. Cada projeto mostra a contagem de PRs abertos."],
+  [2000, 1072, "/code-review", [66.5, 13.5, 13.5, 30], "Ocultar colunas", "Em <em>“Colunas”</em>, o usuário escolhe quais etapas acompanhar. Ao desmarcar “Em revisão”, a coluna some e as demais ocupam o espaço."],
+  [2000, 954, "/code-review", [1.5, 20.5, 15.5, 28], "Tudo em dia", "Quando não há nada aguardando o usuário, “Depende de mim” mostra um <em>estado vazio positivo</em> em vez de uma coluna em branco."],
+  [2000, 1206, "/code-review", [1.5, 16.5, 97.5, 6], "Falha de sincronização", "Se o Azure DevOps não responder, um <em>banner</em> avisa que os dados podem estar desatualizados e oferece nova tentativa. O board continua navegável."],
+  [1440, 785, "/code-review/release/2.15", [2, 84.5, 96, 11.5], "Release atual em tela cheia", "Pelo botão de expandir da coluna Release, o usuário vê a <em>release/2.15</em> agrupada por PBI e task. Um PR sem work item aparece destacado em âmbar."],
+  [1440, 1075, "/code-review/release/2.15", [5.5, 69.5, 30, 24], "Vincular task ao PR", "Em <em>“Vincular task”</em>, uma busca de work items do Azure DevOps sugere tasks pelo título do PR. O usuário escolhe a task certa."],
+  [1440, 895, "/code-review/release/2.15", [69.5, 84.5, 29, 10], "Task vinculada", "O PR <em>#1274</em> passa para o grupo do PBI correspondente, o alerta âmbar some e o resumo confirma que todos os PRs da release têm task."],
+  [2000, 1129, "/code-review", [66.5, 29.5, 15, 52], "Selecionar PRs mergeados", "De volta ao board, o usuário marca em <em>“Mergeados”</em> os PRs que devem ir para a próxima release. O painel sugere o nome <em>release/2.16</em>."],
+  [2000, 1129, "/code-review", [67.5, 76.5, 14, 4], "Criando a branch", "Ao confirmar, o botão entra em <em>carregamento</em> e a seleção fica travada até o Azure DevOps responder."],
+  [2000, 1129, "/code-review", [77.5, 85.5, 21, 9], "Release criada", "A coluna Release passa a mostrar <em>release/2.16</em> com os 3 PRs. Eles saem de “Mergeados” e um toast confirma, com atalho para a release."],
+  [2000, 1129, "/code-review", [77.5, 85.5, 21, 10], "Falha ao criar a branch", "Se um cherry-pick conflitar, <em>nada é criado</em>: a seleção é mantida e o toast explica qual PR causou o problema e como seguir."]
+];
+
+const deck = document.getElementById("deck"), tpl = document.getElementById("step-tpl"), end = deck.querySelector(".end");
+const pct = v => v + "%";
+steps.forEach(([w, h, url, [hx, hy, hw, hh], title, desc], i) => {
+  const n = i + 1, flow = n < 7 ? F1 : F2;
+  if (sections[n]) {
+    const [k, t, d, chips] = sections[n], s = document.createElement("section");
+    s.className = "slide section"; s.dataset.flow = k;
+    s.innerHTML = `<span class="kicker in"><b>${k.slice(0, 8)}</b>${k.slice(8)}</span><h2 class="in" style="--d:1">${t}</h2><p class="in" style="--d:2">${d}</p>
+      <div class="chips">${chips.map((c, j) => `<span class="chip in" style="--d:${3 + j * .5}">${c}</span>`).join("")}</div><span class="num">${k.slice(6, 8)}</span>`;
+    deck.insertBefore(s, end);
+  }
+  const s = tpl.content.firstElementChild.cloneNode(true), cx = hx + hw / 2, cy = hy + hh / 2;
+  s.dataset.flow = flow;
+  if (n === 13) { s.classList.add("alt"); s.querySelector(".tag").hidden = false; }
+  // zoom toward the hotspot, picking an origin that keeps it fully inside the viewport (3% margin)
+  let z = Math.min(1.35, Math.max(1, 0.5 / Math.max(hw, hh) * 100)), ox = cx, oy = cy;
+  const fit = (a, b, c) => { const lo = (b * z - 97) / (z - 1), hi = (a * z - 3) / (z - 1); return lo > hi ? null : Math.min(hi, Math.max(lo, c)); };
+  while (z > 1.01 && ((ox = fit(hx, hx + hw, cx)) === null | (oy = fit(hy, hy + hh, cy)) === null)) z -= .05;
+  if (z <= 1.01) { z = 1; ox = cx; oy = cy; }
+  Object.entries({ "--ar": `${w}/${h}`, "--hx": pct(hx), "--hy": pct(hy), "--hw": pct(hw), "--hh": pct(hh),
+    "--ox": pct(ox), "--oy": pct(oy), "--cx": pct(hx + hw * .85), "--cy": pct(hy + hh * .8), "--z": z.toFixed(2) })
+    .forEach(([k, v]) => s.style.setProperty(k, v));
+  s.querySelector(".kicker").textContent = flow;
+  s.querySelector(".badge").textContent = String(n).padStart(2, "0");
+  s.querySelector("h3").textContent = title;
+  s.querySelector("p").innerHTML = desc;
+  s.querySelector(".url").textContent = "release.muralis.dev" + url;
+  const img = s.querySelector("img");
+  img.src = `screens/${String(n).padStart(2, "0")}.png`; img.alt = title;
+  deck.insertBefore(s, end);
+});
+
+const slides = [...deck.querySelectorAll(".slide")];
+const $ = id => document.getElementById(id);
+let cur = Math.min(Math.max(+location.hash.slice(1) - 1 || 0, 0), slides.length - 1), timer;
+
+function go(i) {
+  cur = (i + slides.length) % slides.length;
+  slides.forEach((s, j) => { s.classList.toggle("active", j === cur); s.classList.toggle("prev", j < cur); });
+  $("progress").style.width = (cur / (slides.length - 1)) * 100 + "%";
+  $("counter").textContent = `${cur + 1} / ${slides.length}`;
+  $("flow").textContent = slides[cur].dataset.flow || "";
+  history.replaceState(null, "", "#" + (cur + 1));
+}
+function play() {
+  clearInterval(timer);
+  timer = timer ? null : setInterval(() => go(cur + 1), 6500);
+  $("play").textContent = timer ? "❚❚" : "▶";
+}
+$("next").onclick = () => go(cur + 1);
+$("back").onclick = () => go(cur - 1);
+$("play").onclick = play;
+addEventListener("keydown", e => {
+  if (["ArrowRight", "PageDown", " "].includes(e.key)) { e.preventDefault(); go(cur + 1); }
+  else if (["ArrowLeft", "PageUp"].includes(e.key)) go(cur - 1);
+  else if (e.key === "Home") go(0);
+  else if (e.key === "End") go(slides.length - 1);
+  else if (e.key.toLowerCase() === "p") play();
+  else if (e.key.toLowerCase() === "f") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+});
+let tx;
+addEventListener("touchstart", e => tx = e.touches[0].clientX, { passive: true });
+addEventListener("touchend", e => { const d = e.changedTouches[0].clientX - tx; if (Math.abs(d) > 50) go(cur + (d < 0 ? 1 : -1)); });
+go(cur);
+</script>
+</body>
+</html>
