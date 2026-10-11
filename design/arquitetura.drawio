@@ -1,0 +1,113 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="arq-hex" name="Arquitetura hexagonal">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="in" value="Adapters de entrada" style="swimlane;startSize=30;html=1;fillColor=#d5e8d4;strokeColor=#82b366;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="220" height="400" as="geometry"/>
+        </mxCell>
+        <mxCell id="ui" value="&lt;b&gt;UI Web&lt;/b&gt;&lt;br&gt;telas do design" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="in">
+          <mxGeometry x="30" y="50" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="wh" value="&lt;b&gt;Webhooks&lt;/b&gt;&lt;br&gt;evento do provedor → evento de domínio" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="in">
+          <mxGeometry x="30" y="170" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="job" value="&lt;b&gt;Jobs de sincronização&lt;/b&gt;&lt;br&gt;rodam sem usuário logado" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="in">
+          <mxGeometry x="30" y="290" width="160" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="core" value="Núcleo — não conhece nenhum provedor" style="swimlane;startSize=30;html=1;fillColor=#fff2cc;strokeColor=#d6b656;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="360" y="40" width="580" height="700" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc" value="&lt;b&gt;Casos de uso&lt;/b&gt;&lt;br&gt;Revisar código&lt;br&gt;Montar release&lt;br&gt;Acompanhar deploy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="core">
+          <mxGeometry x="30" y="200" width="200" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="dom" value="&lt;b&gt;Modelo canônico&lt;/b&gt;&lt;br&gt;PullRequest · Review&lt;br&gt;WorkItem · Release&lt;br&gt;Deployment&lt;br&gt;ID = conexão + id externo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="core">
+          <mxGeometry x="30" y="50" width="200" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="reg" value="&lt;b&gt;Registry de conexões&lt;/b&gt;&lt;br&gt;projeto + capacidade&lt;br&gt;→ adapter + tokens OAuth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="core">
+          <mxGeometry x="30" y="540" width="200" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="pSc" value="«porta»&lt;br&gt;&lt;b&gt;SourceControl&lt;/b&gt;&lt;br&gt;PRs, reviews, commits" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=#ffffff;strokeColor=#d6b656;" vertex="1" parent="core">
+          <mxGeometry x="380" y="60" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="pWt" value="«porta»&lt;br&gt;&lt;b&gt;WorkTracking&lt;/b&gt;&lt;br&gt;itens, status, versões" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=#ffffff;strokeColor=#d6b656;" vertex="1" parent="core">
+          <mxGeometry x="380" y="230" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="pPl" value="«porta»&lt;br&gt;&lt;b&gt;Pipeline&lt;/b&gt;&lt;br&gt;builds, deploys, ambientes" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=#ffffff;strokeColor=#d6b656;" vertex="1" parent="core">
+          <mxGeometry x="380" y="400" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="pId" value="«porta»&lt;br&gt;&lt;b&gt;IdentityProvider&lt;/b&gt;&lt;br&gt;login, quem é o usuário" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=#ffffff;strokeColor=#d6b656;" vertex="1" parent="core">
+          <mxGeometry x="380" y="570" width="170" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="out" value="Adapters de saída" style="swimlane;startSize=30;html=1;fillColor=#d5e8d4;strokeColor=#82b366;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="40" width="220" height="700" as="geometry"/>
+        </mxCell>
+        <mxCell id="aGh" value="GitHub PRs" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="out">
+          <mxGeometry x="30" y="45" width="160" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="aAr" value="Azure Repos" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="out">
+          <mxGeometry x="30" y="105" width="160" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="aJi" value="Jira" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="out">
+          <mxGeometry x="30" y="215" width="160" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="aAb" value="Azure Boards" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="out">
+          <mxGeometry x="30" y="275" width="160" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="aAp" value="Azure Pipelines" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="out">
+          <mxGeometry x="30" y="385" width="160" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="aGa" value="GitHub Actions" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="out">
+          <mxGeometry x="30" y="445" width="160" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="aEn" value="Entra ID" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="out">
+          <mxGeometry x="30" y="582" width="160" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="xGh" value="&lt;b&gt;GitHub&lt;/b&gt;&lt;br&gt;GitHub App" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="60" width="180" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="xJi" value="&lt;b&gt;Jira Cloud&lt;/b&gt;&lt;br&gt;OAuth 3LO" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="225" width="180" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="xAz" value="&lt;b&gt;Azure DevOps&lt;/b&gt;&lt;br&gt;token via Entra" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="400" width="180" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="xEn" value="&lt;b&gt;Microsoft Entra&lt;/b&gt;&lt;br&gt;OpenID Connect" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="595" width="180" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="ui" target="uc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" value="evento de domínio" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="wh" target="uc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="job" target="uc"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e4" value="usa" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="core" source="uc" target="dom"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" value="pede a porta do projeto" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="core" source="uc" target="reg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="core" source="uc" target="pSc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="core" source="uc" target="pWt"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="core" source="uc" target="pPl"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="core" source="uc" target="pId"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="i1" value="implementa" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;endArrow=block;endFill=0;" edge="1" parent="1" source="aGh" target="pSc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="i2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;endArrow=block;endFill=0;" edge="1" parent="1" source="aAr" target="pSc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="i3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;endArrow=block;endFill=0;" edge="1" parent="1" source="aJi" target="pWt"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="i4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;endArrow=block;endFill=0;" edge="1" parent="1" source="aAb" target="pWt"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="i5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;endArrow=block;endFill=0;" edge="1" parent="1" source="aAp" target="pPl"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="i6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;endArrow=block;endFill=0;" edge="1" parent="1" source="aGa" target="pPl"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="i7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;endArrow=block;endFill=0;" edge="1" parent="1" source="aEn" target="pId"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="x1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="aGh" target="xGh"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="x2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="aGa" target="xGh"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="x3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="aJi" target="xJi"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="x4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="aAr" target="xAz"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="x5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="aAb" target="xAz"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="x6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="aAp" target="xAz"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="x7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="aEn" target="xEn"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -6,3 +6,4 @@ Design do Release Management (code review e releases de GetNota, LeadComex e Jan
 |---|---|
 | `design/releaseManagement.pen` | Arquivo fonte do design (pen.dev) |
 | `*.png` (raiz) | Logos |
+| `app/` | Aplicação (API + front) — veja `app/README.md` |
