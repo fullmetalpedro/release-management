@@ -1,0 +1,265 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* Janelas baixas (notebook HD, 1366x768): usado para apertar respiros onde a altura é disputada. */
+@custom-variant short (@media (max-height: 700px));
+
+@theme {
+  --font-sans: 'Inter Variable', Inter, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+
+  /* O design usa a altura de linha natural da fonte; os tamanhos do Tailwind não podem impor a deles. */
+  --text-xs--line-height: normal;
+  --text-sm--line-height: normal;
+  --text-base--line-height: normal;
+  --text-lg--line-height: normal;
+  --text-xl--line-height: normal;
+  --text-2xl--line-height: normal;
+
+  /* Tons do design (releaseManagement.pen). */
+  --color-ink: #0f172a;
+  --color-ink-2: #334155;
+  --color-mute: #64748b;
+  --color-faint: #94a3b8;
+  --color-line: #e4e7ec;
+  --color-line-soft: #f1f5f9;
+  --color-line-row: #eef0f3;
+  --color-canvas: #f8f9fb;
+  --color-lane: #f1f3f6;
+  --color-soft: #f8fafc;
+  --color-focus: #6366f1;
+  /* Hover: um tom para superfícies claras e outro para os menus escuros. */
+  --color-hover: #e9edf2;
+  --color-hover-dark: #353a42;
+}
+
+@layer base {
+  /* O design mede os textos com a altura de linha natural da fonte. */
+  html {
+    line-height: normal;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  /* A interface inteira é desenhada a 90%: as seis colunas cabem na largura de um notebook comum sem rolagem
+     horizontal. As alturas vêm em porcentagem desde a raiz, porque 100vh não acompanharia o zoom. */
+  #root {
+    zoom: var(--ui-zoom);
+    height: 100%;
+  }
+
+  body {
+    --ui-zoom: 0.9;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+
+  /* Hover e foco: fundo e contorno trocam na hora. Animar a cor de fundo faz o navegador desenhar o
+     elemento numa camada à parte durante a transição e, com a interface a 90%, o contorno sai mais
+     grosso e escuro nessa camada, piscando até a animação acabar. Texto, sombra e opacidade seguem suaves. */
+  button,
+  a,
+  label,
+  [role='menuitemcheckbox'] {
+    transition:
+      color 150ms ease,
+      box-shadow 150ms ease,
+      opacity 150ms ease,
+      translate 150ms ease,
+      transform 100ms ease;
+  }
+
+  svg {
+    transition:
+      color 150ms ease,
+      transform 150ms ease;
+  }
+
+  :focus-visible {
+    outline: 1.5px solid var(--color-focus);
+    outline-offset: 1px;
+  }
+}
+
+/* A cor do traço não é herdada: um card dentro de uma coluna destacada mantém o próprio contorno. */
+@property --stroke {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: #e4e7ec;
+}
+
+/* Hover padrão do sistema. Cada utilitário cobre um tipo de elemento; nenhum componente define a própria cor de hover.
+   - hover-row: linha de lista ou opção de menu sobre fundo claro.
+   - hover-surface: controle branco com contorno (botão secundário, seletor): escurece o fundo e o contorno.
+   - hover-primary: botão escuro de ação principal.
+   - hover-dark: linha ou botão dentro dos menus escuros.
+   Elementos com cor própria (âmbar, roxo) sobem um tom da mesma cor, definido no componente. */
+@utility hover-row {
+  &:hover {
+    background-color: var(--color-hover);
+  }
+}
+
+@utility hover-surface {
+  &:hover {
+    background-color: var(--color-hover);
+    --stroke: #cbd5e1;
+  }
+}
+
+@utility hover-primary {
+  &:hover {
+    background-color: #1e293b;
+  }
+}
+
+@utility hover-dark {
+  &:hover {
+    background-color: var(--color-hover-dark);
+  }
+}
+
+/* Traço do Pencil: centrado na borda e sem ocupar espaço no layout. */
+@utility stroke {
+  outline: 1px solid var(--stroke);
+  outline-offset: -0.5px;
+
+  &:focus-visible {
+    outline: 1.5px solid var(--color-focus);
+    outline-offset: -0.75px;
+  }
+}
+
+@utility stroke-2 {
+  outline: 2px solid var(--stroke);
+  outline-offset: -1px;
+}
+
+@utility stroke-focus {
+  outline: 1.5px solid var(--color-focus);
+  outline-offset: -0.75px;
+}
+
+/* Barra de rolagem discreta das colunas: fina e só perceptível quando há o que rolar. */
+@utility column-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-gutter: auto;
+}
+
+@keyframes skeleton {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@utility skeleton {
+  background: var(--color-line-row);
+  animation: skeleton 1.4s ease-in-out infinite;
+}
+
+/* Menus e popovers: surgem de perto de onde foram abertos.
+   Sem escala e sem camada fixa (will-change): com a interface a 90%, uma camada própria é desenhada
+   em resolução menor que o resto da página e muda de tamanho a cada repintura, como num hover. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@utility pop-in {
+  animation: pop-in 140ms ease-out;
+}
+
+/* O mesmo, para o que abre acima do botão. */
+@keyframes pop-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@utility pop-in-up {
+  animation: pop-in-up 140ms ease-out;
+}
+
+/* Conteúdo que acabou de chegar (cards, linhas, colunas) entra com um fade curto. */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@utility fade-up {
+  animation: fade-up 220ms ease-out backwards;
+}
+
+/* Entrada de blocos grandes de texto (cards da tela de entrada, guia do token). Animar o próprio bloco
+   o leva para uma camada à parte, desenhada com outra suavização de texto, e o texto "pula" de nitidez
+   quando a animação acaba. Aqui o conteúdo fica parado e quem some é uma cobertura da cor do fundo. */
+@keyframes cover-out {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@utility fade-cover {
+  position: relative;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: var(--cover-inset, 0px);
+    z-index: 1;
+    background: var(--color-canvas);
+    pointer-events: none;
+    animation: cover-out 220ms ease-out forwards;
+  }
+}
+
+/* Troca entre o board e a release em tela cheia: a tela atual some, a nova aparece. */
+@keyframes page-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+::view-transition-old(root) {
+  animation: page-out 140ms ease-in both;
+}
+
+::view-transition-new(root) {
+  animation: page-in 180ms ease-out 140ms both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

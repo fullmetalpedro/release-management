@@ -1,0 +1,32 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from './api';
+
+// Trocar de repositório não deve disparar nova sincronização: os dados valem até o próximo "Atualizar".
+export const LANE_STALE_MS = 10 * 60_000;
+
+// Sincronização automática: board, raias e release são refeitos sozinhos neste intervalo.
+export const SYNC_INTERVAL_MS = 5 * 60_000;
+
+export const laneKey = (projectId: string | undefined, repositoryId: string | undefined) =>
+  ['lane', projectId, repositoryId] as const;
+export const releaseKey = (projectId: string | undefined, repositoryId: string | undefined, branch?: string) =>
+  ['release', projectId, repositoryId, branch ?? null] as const;
+
+// Carrega as raias de todos os repositórios do projeto numa chamada só e as distribui no cache por repositório.
+export function useAllLanes(projectId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ['lanes', projectId],
+    queryFn: async () => {
+      const result = await api.lanes(projectId!);
+      // Semeia antes de devolver, para as colunas já encontrarem o dado quando forem habilitadas.
+      for (const lane of result.lanes) queryClient.setQueryData(laneKey(projectId, lane.repository.id), lane);
+      return result;
+    },
+    enabled: !!projectId,
+    staleTime: LANE_STALE_MS,
+    gcTime: 3 * LANE_STALE_MS,
+    refetchInterval: SYNC_INTERVAL_MS,
+    retry: false,
+  });
+}

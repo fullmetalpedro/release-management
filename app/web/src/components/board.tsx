@@ -1,0 +1,297 @@
+import {
+  CheckCheck,
+  CircleCheck,
+  CornerUpLeft,
+  Eye,
+  GitCompareArrows,
+  GitMerge,
+  GitPullRequest,
+  MessageSquare,
+  UserCheck,
+  Users,
+  type LucideIcon,
+} from 'lucide-react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import type { PullRequestCard } from '../lib/api';
+import { age, authorLabel } from '../lib/format';
+import { Avatar, cx, Dot, SkeletonCard } from './ui';
+
+export type ColumnId = 'dependsOnMe' | 'review' | 'conflict' | 'ready' | 'merged' | 'release';
+
+export const COLUMNS: { id: ColumnId; name: string; color: string; description: string }[] = [
+  { id: 'dependsOnMe', name: 'Depende de mim', color: '#F59E0B', description: 'Você é revisor ou o PR está aguardando o autor' },
+  { id: 'review', name: 'Em revisão', color: '#3B82F6', description: 'Aguardando votos dos revisores' },
+  { id: 'conflict', name: 'Conflito', color: '#EF4444', description: 'Merge bloqueado até resolver conflitos' },
+  { id: 'ready', name: 'Pronto pra merge', color: '#22C55E', description: 'Aprovado e sem conflitos' },
+  { id: 'merged', name: 'Mergeados', color: '#14B8A6', description: 'Mergeados em develop e fora de release. Selecione para criar uma nova' },
+  { id: 'release', name: 'Release', color: '#8B5CF6', description: 'PRs que entraram na última branch de release' },
+];
+
+export function PrCard({ pr, now }: { pr: PullRequestCard; now: number }) {
+  return (
+    <a
+      href={pr.webUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="stroke fade-up flex flex-col gap-2.5 rounded-lg bg-white p-3.5 hover:shadow-[0_6px_16px_#0F172A1A] hover:[--stroke:#94A3B8]"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <GitPullRequest size={13} className="shrink-0 text-faint" />
+          <span className="truncate font-mono text-[11.5px] text-mute">{pr.repository.name}</span>
+          <span className="font-mono text-[11.5px] text-faint">#{pr.id}</span>
+        </div>
+        <span className="shrink-0 text-xs text-faint">{age(pr.createdAt, now)}</span>
+      </div>
+
+      <p className="text-sm font-semibold leading-[1.35] text-ink">{pr.title}</p>
+
+      {pr.reason === 'reviewer' && (
+        <span className="flex items-center gap-1.5 self-start rounded bg-[#FEF3C7] px-2 py-1">
+          <Eye size={12} className="text-[#B45309]" />
+          <span className="text-xs font-medium text-[#92400E]">Você é revisor</span>
+        </span>
+      )}
+      {pr.reason === 'waiting-author' && (
+        <span className="flex items-center gap-1.5 self-start rounded bg-[#FFEDD5] px-2 py-1">
+          <CornerUpLeft size={12} className="text-[#C2410C]" />
+          <span className="text-xs font-medium text-[#9A3412]">Aguardando o autor</span>
+        </span>
+      )}
+
+      <div className="flex items-center gap-1.5">
+        <GitMerge size={13} className="shrink-0 text-faint" />
+        <span className="text-xs text-mute">para</span>
+        <span className="truncate rounded bg-[#F1F5F9] px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-ink-2">
+          {pr.targetBranch}
+        </span>
+      </div>
+
+      <div className="h-px bg-line-soft" />
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Avatar name={pr.author.name} isMe={pr.author.isMe} avatarKey={pr.author.avatarKey} />
+          <span className="truncate text-xs text-ink-2">{authorLabel(pr.author)}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2.5">
+          {pr.commentCount > 0 && (
+            <span className="flex items-center gap-1" title="Comentários">
+              <MessageSquare size={13} className="text-mute" />
+              <span className="text-xs font-medium text-mute">{pr.commentCount}</span>
+            </span>
+          )}
+          {pr.conflictCount > 0 && (
+            <span className="flex items-center gap-1" title="Conflitos">
+              <GitCompareArrows size={13} className="text-[#DC2626]" />
+              <span className="text-xs font-medium text-[#DC2626]">{pr.conflictCount}</span>
+            </span>
+          )}
+          <span className="flex items-center gap-1" title="Aprovações">
+            <CircleCheck size={13} className={pr.approved ? 'text-[#16A34A]' : 'text-faint'} />
+            <span className={cx('text-xs font-medium', pr.approved ? 'text-[#16A34A]' : 'text-mute')}>
+              {pr.approvals}/{pr.reviewers}
+            </span>
+          </span>
+        </div>
+      </div>
+    </a>
+  );
+}
+
+// Respiro mínimo entre a coluna e o fim da área do board.
+const BOTTOM_MARGIN = 8;
+
+// A coluna só rola quando, inteira, passaria do fim da tela. Enquanto couber, ela cresce à vontade,
+// inclusive sobre a folga de baixo do board; só quando não cabe é que ganha altura máxima e barra.
+function useColumnScroll() {
+  const sectionRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    const scroll = scrollRef.current;
+    const content = contentRef.current;
+    const board = section?.parentElement;
+    if (!section || !scroll || !content || !board) return;
+
+    const measure = () => {
+      const paddingTop = parseFloat(getComputedStyle(board).paddingTop);
+      // clientHeight já desconta a barra horizontal do board, quando existe.
+      const available = board.clientHeight - paddingTop - BOTTOM_MARGIN;
+      // Altura que a coluna teria sem limite: a atual mais o que estiver escondido na rolagem.
+      const natural = section.offsetHeight + (scroll.scrollHeight - scroll.clientHeight);
+      setScrolls(natural > available);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(board);
+    observer.observe(content);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+
+  return { sectionRef, scrollRef, contentRef, scrolls };
+}
+
+export function ColumnShell({
+  id,
+  count,
+  highlight,
+  headerAction,
+  top,
+  footer,
+  children,
+}: {
+  id: ColumnId;
+  count?: number;
+  // Cor do traço de 2px que destaca a coluna durante e depois de criar a release.
+  highlight?: string;
+  headerAction?: ReactNode;
+  // Ficam fora da área de rolagem: acima (seletores, cujos menus não podem ser cortados) e abaixo dela.
+  top?: ReactNode;
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  const column = COLUMNS.find((c) => c.id === id)!;
+  const { sectionRef, scrollRef, contentRef, scrolls } = useColumnScroll();
+  const tone =
+    id === 'dependsOnMe'
+      ? 'bg-[#FFF8EB] [--stroke:#FAD9A1]'
+      : id === 'release'
+        ? 'bg-[#F5F3FF] [--stroke:#DDD6FE]'
+        : 'bg-lane [--stroke:#F1F3F6]';
+  return (
+    <section
+      ref={sectionRef}
+      aria-label={column.name}
+      className={cx(
+        'flex min-w-[225px] flex-1 basis-0 flex-col gap-2.5 self-start rounded-xl p-2.5',
+        scrolls && 'max-h-full',
+        tone,
+        highlight ? 'stroke-2' : 'stroke',
+      )}
+      style={highlight ? ({ '--stroke': highlight } as React.CSSProperties) : undefined}
+    >
+      <header className="flex flex-col gap-1 px-1.5 pb-2 pt-1.5">
+        <div className="flex items-center gap-2">
+          <Dot color={column.color} />
+          <h2 className="text-sm font-bold text-ink">{column.name}</h2>
+          {count !== undefined && (
+            <span className="stroke rounded-[10px] bg-white px-[7px] py-px text-xs font-semibold text-ink-2">{count}</span>
+          )}
+          {headerAction && <span className="ml-auto flex">{headerAction}</span>}
+        </div>
+        <p className={cx('text-xs text-mute', id === 'merged' && 'leading-[1.4]')}>{column.description}</p>
+      </header>
+      {top}
+      {/* A margem negativa leva a barra até a borda da coluna e não corta o contorno dos cards. */}
+      <div
+        ref={scrollRef}
+        className={cx('-mx-2.5 -my-0.5 min-h-0 px-2.5 py-0.5', scrolls && 'column-scroll overflow-y-auto')}
+      >
+        <div ref={contentRef} className="flex flex-col gap-2.5">
+          {children}
+        </div>
+      </div>
+      {footer}
+    </section>
+  );
+}
+
+export function EmptyState() {
+  return (
+    <div className="stroke fade-up flex flex-col items-center gap-2.5 rounded-lg bg-white px-5 py-8">
+      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#DCFCE7]">
+        <CheckCheck size={20} className="text-[#16A34A]" />
+      </span>
+      <p className="text-sm font-semibold text-ink">Nada depende de você</p>
+      <p className="text-center text-[12.5px] leading-[1.45] text-mute">
+        Você está em dia com as revisões. Novos PRs aparecem aqui automaticamente.
+      </p>
+    </div>
+  );
+}
+
+export type ReviewerScope = 'all' | 'required';
+
+// Na coluna "Depende de mim": todos os PRs em que sou revisor, ou só aqueles em que meu voto é obrigatório.
+export function ReviewerScopeToggle({ value, onChange }: { value: ReviewerScope; onChange: (value: ReviewerScope) => void }) {
+  const options: { id: ReviewerScope; label: string; icon: LucideIcon }[] = [
+    { id: 'all', label: 'Todos os PRs em que sou revisor', icon: Users },
+    { id: 'required', label: 'Só os PRs em que sou revisor obrigatório', icon: UserCheck },
+  ];
+  return (
+    <div className="flex items-center justify-between gap-2 px-1.5">
+      <span className="text-xs text-mute">Como revisor</span>
+      <div role="radiogroup" aria-label="PRs em que sou revisor" className="flex gap-0.5 rounded-lg bg-[#FDEFD3] p-[3px]">
+        {options.map((option) => {
+          const selected = option.id === value;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={option.label}
+              title={option.label}
+              onClick={() => onChange(option.id)}
+              className={cx(
+                'flex h-6 w-7 items-center justify-center rounded-md',
+                selected ? 'bg-white text-ink shadow-[0_1px_2px_#0F172A14]' : 'text-[#92400E] hover:text-ink',
+              )}
+            >
+              <option.icon size={14} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function QuietNote({ children }: { children: ReactNode }) {
+  return <p className="px-1.5 pb-1 text-xs text-faint">{children}</p>;
+}
+
+export function OpenColumn({
+  id,
+  cards,
+  loading,
+  emptyState,
+  filtered,
+  now,
+  controls,
+  emptyNote = 'Nenhum PR com esses filtros',
+}: {
+  id: Exclude<ColumnId, 'merged' | 'release'>;
+  cards: PullRequestCard[];
+  loading: boolean;
+  // Só o board completo e sem filtros pode afirmar que nada depende do usuário.
+  emptyState: boolean;
+  filtered: boolean;
+  now: number;
+  // Controles próprios da coluna, logo abaixo do cabeçalho.
+  controls?: ReactNode;
+  emptyNote?: string;
+}) {
+  if (loading) {
+    return (
+      <ColumnShell id={id}>
+        {Array.from({ length: id === 'dependsOnMe' ? 3 : 2 }, (_, i) => (
+          <SkeletonCard key={i} />
+        ))}
+      </ColumnShell>
+    );
+  }
+  return (
+    <ColumnShell id={id} count={cards.length} top={controls}>
+      {cards.map((pr) => (
+        <PrCard key={`${pr.provider}-${pr.id}`} pr={pr} now={now} />
+      ))}
+      {cards.length === 0 && id === 'dependsOnMe' && emptyState && <EmptyState />}
+      {cards.length === 0 && filtered && <QuietNote>{emptyNote}</QuietNote>}
+    </ColumnShell>
+  );
+}
