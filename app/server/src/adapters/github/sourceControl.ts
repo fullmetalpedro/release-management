@@ -14,6 +14,7 @@ import type {
 import type { CreateReleaseBranchInput, SourceControl } from '../../core/ports/sourceControl.ts';
 import { compareVersionsDesc, literalPrefix } from '../../core/usecases/releaseNaming.ts';
 import { isHttpStatus, JsonClient, type FetchLike } from '../http-json.ts';
+import { msg } from '../../i18n.ts';
 
 interface GhUser {
   id: number;
@@ -115,7 +116,7 @@ export function toReviews(pull: Pick<GqlPull, 'reviewRequests' | 'latestOpiniona
     });
   }
   for (const request of pull.reviewRequests.nodes) {
-    const actor = request.requestedReviewer;
+    const actor = request?.requestedReviewer;
     if (!actor || !('login' in actor)) continue;
     const reviewer = fromActor(actor as GqlActor);
     // Pedir revisão de novo zera o voto anterior da pessoa.
@@ -172,10 +173,14 @@ export class GitHubSourceControl implements SourceControl {
   }
 
   currentUser(): Promise<Person> {
-    this.me ??= this.client.get<GhUser & { email?: string | null }>('/user').then((user) => ({
-      ...fromUser(user),
-      email: user.email ?? user.login,
-    }));
+    this.me ??= this.client
+      .get<GhUser & { email?: string | null }>('/user')
+      .then((user) => ({ ...fromUser(user), email: user.email ?? user.login }))
+      .catch((error) => {
+        // Uma falha passageira não fica guardada: a próxima chamada tenta de novo.
+        this.me = undefined;
+        throw error;
+      });
     return this.me;
   }
 
@@ -205,10 +210,17 @@ export class GitHubSourceControl implements SourceControl {
       if (!isHttpStatus(error, 404)) throw error;
       const mine = await this.client.get<Repo[]>('/user/repos', { per_page: 100, affiliation: 'owner', sort: 'pushed' });
       repos = mine.filter((repo) => repo.owner.login.toLowerCase() === projectId.toLowerCase());
+      // Nem organização nem a conta do token: o dono não existe ou o token não o enxerga.
+      if (repos.length === 0 && !(await this.ownsAccount(projectId))) throw error;
     }
     return repos
       .filter((repo) => !repo.archived && !repo.disabled)
       .map((repo) => ({ id: repo.name, name: repo.name, projectId }));
+  }
+
+  private async ownsAccount(owner: string): Promise<boolean> {
+    const { login } = await this.client.get<{ login: string }>('/user');
+    return login.toLowerCase() === owner.toLowerCase();
   }
 
   private openQuery(projectId: string) {
@@ -227,9 +239,10 @@ export class GitHubSourceControl implements SourceControl {
     const pulls: GqlPull[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < OPEN_MAX_PAGES; page++) {
-      const data: { search: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (GqlPull | Record<string, never>)[] } } =
+      const data: { search: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (GqlPull | Record<string, never> | null)[] } } =
         await this.graphql(OPEN_PULLS, { q: this.openQuery(projectId), cursor });
-      pulls.push(...data.search.nodes.filter((node): node is GqlPull => 'number' in node));
+      // O GitHub devolve null no lugar de itens que o token não pode ver (repositório com SSO, por exemplo).
+      pulls.push(...data.search.nodes.filter((node): node is GqlPull => !!node && 'number' in node));
       if (!data.search.pageInfo.hasNextPage) break;
       cursor = data.search.pageInfo.endCursor;
     }
@@ -290,7 +303,8 @@ export class GitHubSourceControl implements SourceControl {
         await this.client.get(`${this.repo(repository)}/branches/${encodeURIComponent(name)}`);
         return true;
       } catch (error) {
-        if (isHttpStatus(error, 404)) return false;
+        // 301 é a resposta para uma branch renomeada: com este nome ela não existe mais.
+        if (isHttpStatus(error, 404, 301)) return false;
         throw error;
       }
     });
@@ -365,11 +379,11 @@ export class GitHubSourceControl implements SourceControl {
       for (const pullRequestId of pullRequestIds) {
         const pull = await this.client.get<GhPull>(`${repo}/pulls/${pullRequestId}`);
         if (!pull.merge_commit_sha) {
-          throw new ProviderUnavailableError('github', `O PR #${pullRequestId} não tem commit de merge`);
+          throw new ProviderUnavailableError('github', msg('prNoMergeCommit', { id: pullRequestId }));
         }
         const picked = await this.client.get<GhCommit>(`${repo}/git/commits/${pull.merge_commit_sha}`);
         const parent = picked.parents[0]?.sha;
-        if (!parent) throw new ProviderUnavailableError('github', `O commit do PR #${pullRequestId} não tem pai`);
+        if (!parent) throw new ProviderUnavailableError('github', msg('prCommitNoParent', { id: pullRequestId }));
 
         const staging = await this.client.json<GhCommit>(`${repo}/git/commits`, {
           method: 'POST',
@@ -389,7 +403,7 @@ export class GitHubSourceControl implements SourceControl {
         if (merge.status === 409) throw new CherryPickConflictError(pullRequestId, baseBranch);
         if (merge.status !== 201 && merge.status !== 204) {
           const detail = (await merge.json().catch(() => ({}))) as { message?: string };
-          throw new ProviderUnavailableError('github', detail.message ?? `Não foi possível aplicar o PR #${pullRequestId}`, merge.status);
+          throw new ProviderUnavailableError('github', detail.message ?? msg('prApplyFailed', { id: pullRequestId }), merge.status);
         }
         // 204: a release já contém essas mudanças; não há commit novo a criar.
         if (merge.status === 204) continue;
@@ -400,7 +414,8 @@ export class GitHubSourceControl implements SourceControl {
         // A mensagem precisa carregar o número do PR: é por ela que a release é reconhecida depois.
         const message = pullRequestIdsFromMessages([original]).includes(pullRequestId)
           ? original
-          : original.replace(firstLine, `${firstLine} (#${pullRequestId})`);
+          : // Função, e não texto: num título com `$&` ou `$'` o replace interpretaria o cifrão.
+            original.replace(firstLine, () => `${firstLine} (#${pullRequestId})`);
         const commit = await this.client.json<GhCommit>(`${repo}/git/commits`, {
           method: 'POST',
           body: { message, tree: merged.commit.tree.sha, parents: [tip] },
@@ -473,7 +488,7 @@ export class GitHubSourceControl implements SourceControl {
       body: { query, variables },
     });
     if (!result.data) {
-      throw new ProviderUnavailableError('github', result.errors?.map((e) => e.message).join(' ') ?? 'O GitHub não devolveu dados');
+      throw new ProviderUnavailableError('github', result.errors?.map((e) => e.message).join(' ') ?? msg('githubNoData'));
     }
     return result.data;
   }

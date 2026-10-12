@@ -13,7 +13,8 @@ import type {
 } from '../../core/domain/types.ts';
 import type { CreateReleaseBranchInput, SourceControl } from '../../core/ports/sourceControl.ts';
 import { compareVersionsDesc, literalPrefix } from '../../core/usecases/releaseNaming.ts';
-import { AzureDevOpsHttpError, mapLimit, type AzureDevOpsClient } from './client.ts';
+import { AzureDevOpsHttpError, isTransientStatus, mapLimit, type AzureDevOpsClient } from './client.ts';
+import { msg } from '../../i18n.ts';
 
 interface List<T> {
   value: T[];
@@ -165,7 +166,12 @@ export class AzureDevOpsSourceControl implements SourceControl {
         name: user.providerDisplayName,
         email: user.properties?.Account?.$value,
         avatarKey: avatarKeyOf({ id: user.id, displayName: '', descriptor: user.subjectDescriptor }),
-      }));
+      }))
+      .catch((error) => {
+        // Uma falha passageira não fica guardada: a próxima chamada tenta de novo.
+        this.me = undefined;
+        throw error;
+      });
     return this.me;
   }
 
@@ -184,7 +190,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
 
   async listRepositories(projectId: string): Promise<Repository[]> {
     const { value } = await this.client.get<List<{ id: string; name: string; isDisabled?: boolean }>>(
-      `/${projectId}/_apis/git/repositories`,
+      `/${encodeURIComponent(projectId)}/_apis/git/repositories`,
     );
     return value.filter((r) => !r.isDisabled).map((r) => ({ id: r.id, name: r.name, projectId }));
   }
@@ -207,7 +213,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
 
   async listMergedPullRequests(repository: Repository, targetBranch: string): Promise<PullRequest[]> {
     const { value } = await this.client.get<List<AdoPullRequest>>(
-      `/${repository.projectId}/_apis/git/repositories/${repository.id}/pullrequests`,
+      `/${encodeURIComponent(repository.projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}/pullrequests`,
       {
         query: {
           'searchCriteria.status': 'completed',
@@ -223,7 +229,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
     const found = await mapLimit(ids, CONCURRENCY, async (id) => {
       try {
         return await this.client.get<AdoPullRequest>(
-          `/${repository.projectId}/_apis/git/repositories/${repository.id}/pullrequests/${id}`,
+          `/${encodeURIComponent(repository.projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}/pullrequests/${id}`,
         );
       } catch (error) {
         // Um "Merged PR N" na mensagem pode apontar para um PR de outro repositório.
@@ -281,7 +287,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
 
   async createReleaseBranch(input: CreateReleaseBranchInput): Promise<ReleaseBranch> {
     const { repository, name, baseBranch, pullRequestIds } = input;
-    const repoPath = `/${repository.projectId}/_apis/git/repositories/${repository.id}`;
+    const repoPath = `/${encodeURIComponent(repository.projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}`;
     const run = randomBytes(4).toString('hex');
     const tempRefs: string[] = [];
 
@@ -290,24 +296,25 @@ export class AzureDevOpsSourceControl implements SourceControl {
       let onto = HEADS + baseBranch;
       for (const [index, pullRequestId] of pullRequestIds.entries()) {
         const generated = `${HEADS}rm-tmp/${run}/${index}`;
+        // Anotada antes do pedido: se ele estourar o tempo, a branch pode ter sido criada e ainda precisa sair.
+        tempRefs.push(generated);
         const started = await this.client.post<AdoCherryPick>(`${repoPath}/cherryPicks`, {
           apiVersion: PREVIEW,
           body: { generatedRefName: generated, ontoRefName: onto, source: { pullRequestId } },
         });
-        tempRefs.push(generated);
         const finished = await this.waitForCherryPick(repoPath, started);
         if (finished.status !== 'completed') {
           if (finished.detailedStatus?.conflict) throw new CherryPickConflictError(pullRequestId, baseBranch);
           throw new ProviderUnavailableError(
             'azure-devops',
-            finished.detailedStatus?.failureMessage ?? `Cherry-pick do PR #${pullRequestId} falhou`,
+            finished.detailedStatus?.failureMessage ?? msg('cherryPickFailed', { id: pullRequestId }),
           );
         }
         onto = generated;
       }
 
       const [tip] = await this.listRefs(repository, stripHeads(onto));
-      if (!tip) throw new ProviderUnavailableError('azure-devops', 'Não foi possível localizar o resultado do cherry-pick');
+      if (!tip) throw new ProviderUnavailableError('azure-devops', msg('cherryPickResultMissing'));
       await this.updateRefs(repoPath, [{ name: HEADS + name, oldObjectId: ZERO_SHA, newObjectId: tip.objectId }]);
     } finally {
       await this.deleteRefs(repository, repoPath, tempRefs);
@@ -329,7 +336,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
     let current = started;
     while (current.status === 'queued' || current.status === 'inProgress') {
       if (Date.now() > deadline) {
-        throw new ProviderUnavailableError('azure-devops', 'O Azure DevOps demorou demais para aplicar o cherry-pick');
+        throw new ProviderUnavailableError('azure-devops', msg('cherryPickTimeout'));
       }
       await new Promise((resolve) => setTimeout(resolve, pollMs));
       current = await this.client.get<AdoCherryPick>(`${repoPath}/cherryPicks/${started.cherryPickId}`, {
@@ -348,7 +355,9 @@ export class AzureDevOpsSourceControl implements SourceControl {
     if (failed) {
       throw new ProviderUnavailableError(
         'azure-devops',
-        `Não foi possível atualizar ${stripHeads(failed.name)}: ${failed.updateStatus ?? 'erro desconhecido'}`,
+        failed.updateStatus
+          ? msg('refUpdateFailed', { branch: stripHeads(failed.name), status: failed.updateStatus })
+          : msg('refUpdateFailedUnknown', { branch: stripHeads(failed.name) }),
       );
     }
   }
@@ -369,7 +378,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
   private async recentCommits(repository: Repository, branch: string, since?: string): Promise<AdoCommit[]> {
     try {
       const { value } = await this.client.get<List<AdoCommit>>(
-        `/${repository.projectId}/_apis/git/repositories/${repository.id}/commits`,
+        `/${encodeURIComponent(repository.projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}/commits`,
         {
           query: {
             'searchCriteria.itemVersion.version': branch,
@@ -389,14 +398,14 @@ export class AzureDevOpsSourceControl implements SourceControl {
 
   private async listRefs(repository: Repository, headsPrefix: string): Promise<AdoRef[]> {
     const { value } = await this.client.get<List<AdoRef>>(
-      `/${repository.projectId}/_apis/git/repositories/${repository.id}/refs`,
+      `/${encodeURIComponent(repository.projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}/refs`,
       { query: { filter: `heads/${headsPrefix}` } },
     );
     return value;
   }
 
   private async fetchActive(projectId: string): Promise<AdoPullRequest[]> {
-    const { value } = await this.client.get<List<AdoPullRequest>>(`/${projectId}/_apis/git/pullrequests`, {
+    const { value } = await this.client.get<List<AdoPullRequest>>(`/${encodeURIComponent(projectId)}/_apis/git/pullrequests`, {
       query: { 'searchCriteria.status': 'active', $top: 500 },
     });
     return value;
@@ -406,7 +415,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
     try {
       const { value } = await this.client.get<
         List<{ isDeleted?: boolean; comments?: { commentType?: string; isDeleted?: boolean }[] }>
-      >(`/${pr.repository.project.id}/_apis/git/repositories/${pr.repository.id}/pullRequests/${pr.pullRequestId}/threads`);
+      >(`/${encodeURIComponent(pr.repository.project.id)}/_apis/git/repositories/${encodeURIComponent(pr.repository.id)}/pullRequests/${pr.pullRequestId}/threads`);
       return value.filter(
         (thread) => !thread.isDeleted && thread.comments?.some((c) => c.commentType === 'text' && !c.isDeleted),
       ).length;
@@ -419,14 +428,15 @@ export class AzureDevOpsSourceControl implements SourceControl {
   private async policiesOf(pr: AdoPullRequest) {
     try {
       const projectId = pr.repository.project.id;
-      const { value } = await this.client.get<List<AdoPolicyEvaluation>>(`/${projectId}/_apis/policy/evaluations`, {
+      const { value } = await this.client.get<List<AdoPolicyEvaluation>>(`/${encodeURIComponent(projectId)}/_apis/policy/evaluations`, {
         apiVersion: PREVIEW,
         query: { artifactId: `vstfs:///CodeReview/CodeReviewId/${projectId}/${pr.pullRequestId}` },
       });
       return summarizePolicies(value);
     } catch (error) {
-      // Sem acesso às políticas, vale a regra dos revisores.
-      if (error instanceof AzureDevOpsHttpError) return {};
+      // Sem acesso às políticas, vale a regra dos revisores. Limite de requisições e falha do provedor sobem
+      // como erro: classificar o PR sem as políticas o colocaria na coluna errada.
+      if (error instanceof AzureDevOpsHttpError && !isTransientStatus(error.status)) return {};
       throw error;
     }
   }
@@ -434,7 +444,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
   private async countConflicts(pr: AdoPullRequest): Promise<number> {
     try {
       const { value } = await this.client.get<List<unknown>>(
-        `/${pr.repository.project.id}/_apis/git/repositories/${pr.repository.id}/pullRequests/${pr.pullRequestId}/conflicts`,
+        `/${encodeURIComponent(pr.repository.project.id)}/_apis/git/repositories/${encodeURIComponent(pr.repository.id)}/pullRequests/${pr.pullRequestId}/conflicts`,
         { apiVersion: PREVIEW },
       );
       return Math.max(value.length, 1);
@@ -447,7 +457,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
   private async branchCreation(repository: Repository, refName: string): Promise<{ date: string; by: Person } | undefined> {
     try {
       const { value } = await this.client.get<List<{ date: string; pushedBy: AdoIdentity }>>(
-        `/${repository.projectId}/_apis/git/repositories/${repository.id}/pushes`,
+        `/${encodeURIComponent(repository.projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}/pushes`,
         { query: { 'searchCriteria.refName': refName, $top: 100 } },
       );
       const first = value.at(-1);
@@ -462,7 +472,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
   private async detectBase(repository: Repository, branch: string): Promise<string | undefined> {
     try {
       const stats = await this.client.get<{ aheadCount: number }>(
-        `/${repository.projectId}/_apis/git/repositories/${repository.id}/stats/branches`,
+        `/${encodeURIComponent(repository.projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}/stats/branches`,
         {
           query: {
             name: branch,
@@ -479,7 +489,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
   }
 
   private branchUrl(repository: Repository, branch: string) {
-    return `${this.client.baseUrl}/${repository.projectId}/_git/${encodeURIComponent(repository.name)}?version=GB${encodeURIComponent(branch)}`;
+    return `${this.client.baseUrl}/${encodeURIComponent(repository.projectId)}/_git/${encodeURIComponent(repository.name)}?version=GB${encodeURIComponent(branch)}`;
   }
 
   private toPullRequest(
@@ -514,7 +524,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
       conflictCount: counts.conflictCount,
       commentCount: counts.commentCount,
       reviews,
-      webUrl: `${this.client.baseUrl}/${repository.projectId}/_git/${encodeURIComponent(repository.name)}/pullrequest/${pr.pullRequestId}`,
+      webUrl: `${this.client.baseUrl}/${encodeURIComponent(repository.projectId)}/_git/${encodeURIComponent(repository.name)}/pullrequest/${pr.pullRequestId}`,
     };
   }
 }

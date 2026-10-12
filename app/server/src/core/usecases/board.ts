@@ -49,7 +49,7 @@ export function isApproved(pr: PullRequest): boolean {
   const approvals = pr.reviews.filter((r) => r.decision === 'approved').length;
   const blocked = pr.reviews.some((r) => r.decision === 'rejected' || r.decision === 'waiting-author');
   const required = requiredApprovals(pr);
-  return required > 0 && approvals >= required && !blocked && !pr.blockedByPolicy;
+  return !pr.isDraft && required > 0 && approvals >= required && !blocked && !pr.blockedByPolicy;
 }
 
 export function classify(pr: PullRequest, me: Person): { column: BoardColumnId; reason?: DependsOnMeReason } {
@@ -58,9 +58,11 @@ export function classify(pr: PullRequest, me: Person): { column: BoardColumnId; 
     return { column: 'dependsOnMe', reason: 'waiting-author' };
   }
   const myReview = pr.reviews.find((r) => r.reviewer.id === me.id);
-  // Meu voto pendente só pesa enquanto faltam aprovações; se o que barra o PR é outra política, não depende de mim.
+  // Meu voto pendente pesa quando sou revisor obrigatório ou enquanto faltam aprovações; se o que barra o PR é
+  // outra política, não depende de mim.
   const approvals = pr.reviews.filter((r) => r.decision === 'approved').length;
-  if (!iAmAuthor && !pr.isDraft && myReview?.decision === 'pending' && approvals < requiredApprovals(pr)) {
+  const myVoteIsNeeded = myReview?.decision === 'pending' && (myReview.required || approvals < requiredApprovals(pr));
+  if (!iAmAuthor && !pr.isDraft && myVoteIsNeeded) {
     return { column: 'dependsOnMe', reason: 'reviewer' };
   }
   if (pr.mergeState === 'conflicts') return { column: 'conflict' };

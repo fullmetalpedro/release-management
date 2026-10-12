@@ -1,4 +1,5 @@
 export type ProviderId = 'azure-devops' | 'github' | 'jira';
+import { localeTag, t } from './i18n';
 export type BoardColumnId = 'dependsOnMe' | 'review' | 'conflict' | 'ready';
 
 export interface PersonView {
@@ -133,6 +134,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       credentials: 'same-origin',
       headers: {
         Accept: 'application/json',
+        // As mensagens de erro do servidor voltam no idioma da interface.
+        'Accept-Language': localeTag(),
         // O servidor exige este cabeçalho nas escritas (proteção contra CSRF).
         ...(method !== 'GET' ? { 'X-Requested-With': 'fetch' } : {}),
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
@@ -140,7 +143,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError(0, 'network', 'Sem conexão com o servidor');
+    throw new ApiError(0, 'network', t('errors.offline'));
   }
   if (response.status === 204) return undefined as T;
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
@@ -148,7 +151,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(
       response.status,
       String(payload.code ?? 'error'),
-      String(payload.message ?? `Erro ${response.status}`),
+      String(payload.message ?? t('errors.http', { status: response.status })),
       payload,
     );
   }

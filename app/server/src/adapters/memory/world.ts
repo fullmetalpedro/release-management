@@ -107,8 +107,8 @@ export function createWorld(now = Date.now()): World {
 
   // GetNota · board
   open('getnota-api', 1287, 'feat: validação de NF-e no recebimento', MANOEL, DAY, [[PEDRO, 'pending', true], [ANA, 'pending']], { commentCount: 3 });
-  open('getnota-web', 642, 'fix: paginação da listagem de notas fiscais', PEDRO, 3 * HOUR, [[MANOEL, 'waiting-author'], [ANA, 'pending']], { commentCount: 5, mergeState: 'conflicts', conflictCount: 1 });
   open('getnota-worker', 311, 'feat: retry exponencial na integração com a Sefaz', MANOEL, 2 * DAY, [[PEDRO, 'pending'], [ANA, 'approved']], { targetBranch: 'release/2.14' });
+  open('getnota-web', 642, 'fix: paginação da listagem de notas fiscais', PEDRO, 3 * HOUR, [[MANOEL, 'waiting-author'], [ANA, 'pending']], { commentCount: 5, mergeState: 'conflicts', conflictCount: 1 });
   open('getnota-api', 1279, 'refactor: extrair serviço de cálculo de impostos', PEDRO, 4 * DAY, [[MANOEL, 'waiting-author'], [ANA, 'pending']], { commentCount: 7 });
   open('getnota-web', 650, 'feat: filtro por CNPJ no dashboard', PEDRO, 5 * HOUR, [[MANOEL, 'pending'], [ANA, 'pending']], { commentCount: 1 });
   open('getnota-api', 1290, 'chore: atualizar Spring Boot para 3.4', MANOEL, DAY + HOUR, [[ANA, 'approved'], [BRUNO, 'pending']]);
@@ -204,7 +204,7 @@ export function createWorld(now = Date.now()): World {
     item(48190, 'Relatórios fiscais', 'pbi', doing),
     item(48191, 'Relatório de notas canceladas', 'task', done, 48190, [1295]),
     item(48193, 'Filtro por período no extrato', 'task', testing, 48190, [1291]),
-    item(48148, 'CNPJ com zeros à esquerda é rejeitado', 'bug', done, 48140, [1294]),
+    item(48148, 'Validação de CNPJ rejeita zeros à esquerda', 'bug', done, 48140),
   ];
 
   return { me: PEDRO, projects, repositories, pullRequests, releases, workItems };

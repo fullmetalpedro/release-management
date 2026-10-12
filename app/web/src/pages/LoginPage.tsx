@@ -8,10 +8,12 @@ import { useStoredState } from '../lib/format';
 import { fetchAuthMode } from '../lib/pat';
 import { useMe } from '../lib/session';
 import { ENTRY_CARD_HEIGHT, PatConnectPage } from './PatConnectPage';
+import { t } from '../lib/i18n';
 
-const ERRORS: Record<string, string> = {
-  cancelado: 'O login foi cancelado antes de terminar.',
-  falha: 'Não foi possível concluir o login com a Microsoft. Tente novamente.',
+// O servidor devolve o motivo em ?erro=, com os códigos em português da rota de callback.
+const ERRORS: Record<string, () => string> = {
+  cancelado: () => t('login.canceled'),
+  falha: () => t('login.failed'),
 };
 
 function ProviderButton({ logo, label, onClick }: { logo: ReactNode; label: string; onClick: () => void }) {
@@ -29,14 +31,14 @@ function ProviderButton({ logo, label, onClick }: { logo: ReactNode; label: stri
 
 type Method = 'microsoft' | 'pat';
 
-const METHODS: { id: Method; label: string }[] = [
-  { id: 'microsoft', label: 'Login' },
-  { id: 'pat', label: 'Token pessoal' },
+const METHODS: { id: Method; label: () => string }[] = [
+  { id: 'microsoft', label: () => t('login.signIn') },
+  { id: 'pat', label: () => t('login.personalToken') },
 ];
 
 function MethodSelector({ value, onChange }: { value: Method; onChange: (value: Method) => void }) {
   return (
-    <div role="tablist" aria-label="Forma de entrar" className="flex gap-0.5 rounded-lg bg-[#EEF0F3] p-[3px]">
+    <div role="tablist" aria-label={t('login.methods')} className="flex gap-0.5 rounded-lg bg-[#EEF0F3] p-[3px]">
       {METHODS.map((method) => {
         const selected = method.id === value;
         return (
@@ -51,7 +53,7 @@ function MethodSelector({ value, onChange }: { value: Method; onChange: (value: 
               selected ? 'bg-white font-semibold text-ink shadow-[0_1px_2px_#0F172A14]' : 'font-medium text-mute hover:text-ink',
             )}
           >
-            {method.label}
+            {method.label()}
           </button>
         );
       })}
@@ -96,13 +98,13 @@ export function LoginPage() {
 function ProviderLoginPage({ available }: { available: boolean }) {
   const toast = useToast();
   const [params] = useSearchParams();
-  const error = ERRORS[params.get('erro') ?? ''];
+  const error = ERRORS[params.get('erro') ?? '']?.();
 
   const unavailable = (provider: string) =>
     toast.show({
       kind: 'error',
-      title: `Login com ${provider} ainda não disponível`,
-      description: 'Por enquanto, entre com sua conta Microsoft ou com um token pessoal.',
+      title: t('login.unavailable', { provider }),
+      description: t('login.unavailableBody'),
     });
 
   return (
@@ -124,11 +126,11 @@ function ProviderLoginPage({ available }: { available: boolean }) {
           )}
           <ProviderButton
             logo={<MicrosoftLogo />}
-            label="Continuar com Microsoft"
+            label={t('login.continueWith', { provider: 'Microsoft' })}
             onClick={() => (available ? window.location.assign('/auth/microsoft/login') : unavailable('Microsoft'))}
           />
-          <ProviderButton logo={<GitHubLogo />} label="Continuar com GitHub" onClick={() => unavailable('GitHub')} />
-          <ProviderButton logo={<JiraLogo />} label="Continuar com Jira" onClick={() => unavailable('Jira')} />
+          <ProviderButton logo={<GitHubLogo />} label={t('login.continueWith', { provider: 'GitHub' })} onClick={() => unavailable('GitHub')} />
+          <ProviderButton logo={<JiraLogo />} label={t('login.continueWith', { provider: 'Jira' })} onClick={() => unavailable('Jira')} />
         </div>
       </main>
   );

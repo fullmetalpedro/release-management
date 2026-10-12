@@ -15,16 +15,29 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { PullRequestCard } from '../lib/api';
 import { age, authorLabel } from '../lib/format';
 import { Avatar, cx, Dot, SkeletonCard } from './ui';
+import { t } from '../lib/i18n';
 
 export type ColumnId = 'dependsOnMe' | 'review' | 'conflict' | 'ready' | 'merged' | 'release';
 
-export const COLUMNS: { id: ColumnId; name: string; color: string; description: string }[] = [
-  { id: 'dependsOnMe', name: 'Depende de mim', color: '#F59E0B', description: 'Você é revisor ou o PR está aguardando o autor' },
-  { id: 'review', name: 'Em revisão', color: '#3B82F6', description: 'Aguardando votos dos revisores' },
-  { id: 'conflict', name: 'Conflito', color: '#EF4444', description: 'Merge bloqueado até resolver conflitos' },
-  { id: 'ready', name: 'Pronto pra merge', color: '#22C55E', description: 'Aprovado e sem conflitos' },
-  { id: 'merged', name: 'Mergeados', color: '#14B8A6', description: 'Mergeados em develop e fora de release. Selecione para criar uma nova' },
-  { id: 'release', name: 'Release', color: '#8B5CF6', description: 'PRs que entraram na última branch de release' },
+// Nome e descrição vêm do catálogo na hora da leitura, no idioma atual.
+const column = (id: ColumnId, color: string) => ({
+  id,
+  color,
+  get name() {
+    return t(`columns.${id}.name`);
+  },
+  get description() {
+    return t(`columns.${id}.description`);
+  },
+});
+
+export const COLUMNS = [
+  column('dependsOnMe', '#F59E0B'),
+  column('review', '#3B82F6'),
+  column('conflict', '#EF4444'),
+  column('ready', '#22C55E'),
+  column('merged', '#14B8A6'),
+  column('release', '#8B5CF6'),
 ];
 
 export function PrCard({ pr, now }: { pr: PullRequestCard; now: number }) {
@@ -49,19 +62,19 @@ export function PrCard({ pr, now }: { pr: PullRequestCard; now: number }) {
       {pr.reason === 'reviewer' && (
         <span className="flex items-center gap-1.5 self-start rounded bg-[#FEF3C7] px-2 py-1">
           <Eye size={12} className="text-[#B45309]" />
-          <span className="text-xs font-medium text-[#92400E]">Você é revisor</span>
+          <span className="text-xs font-medium text-[#92400E]">{t('card.reviewer')}</span>
         </span>
       )}
       {pr.reason === 'waiting-author' && (
         <span className="flex items-center gap-1.5 self-start rounded bg-[#FFEDD5] px-2 py-1">
           <CornerUpLeft size={12} className="text-[#C2410C]" />
-          <span className="text-xs font-medium text-[#9A3412]">Aguardando o autor</span>
+          <span className="text-xs font-medium text-[#9A3412]">{t('card.waitingAuthor')}</span>
         </span>
       )}
 
       <div className="flex items-center gap-1.5">
         <GitMerge size={13} className="shrink-0 text-faint" />
-        <span className="text-xs text-mute">para</span>
+        <span className="text-xs text-mute">{t('card.into')}</span>
         <span className="truncate rounded bg-[#F1F5F9] px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-ink-2">
           {pr.targetBranch}
         </span>
@@ -76,18 +89,18 @@ export function PrCard({ pr, now }: { pr: PullRequestCard; now: number }) {
         </div>
         <div className="flex shrink-0 items-center gap-2.5">
           {pr.commentCount > 0 && (
-            <span className="flex items-center gap-1" title="Comentários">
+            <span className="flex items-center gap-1" title={t('card.comments')}>
               <MessageSquare size={13} className="text-mute" />
               <span className="text-xs font-medium text-mute">{pr.commentCount}</span>
             </span>
           )}
           {pr.conflictCount > 0 && (
-            <span className="flex items-center gap-1" title="Conflitos">
+            <span className="flex items-center gap-1" title={t('card.conflicts')}>
               <GitCompareArrows size={13} className="text-[#DC2626]" />
               <span className="text-xs font-medium text-[#DC2626]">{pr.conflictCount}</span>
             </span>
           )}
-          <span className="flex items-center gap-1" title="Aprovações">
+          <span className="flex items-center gap-1" title={t('card.approvals')}>
             <CircleCheck size={13} className={pr.approved ? 'text-[#16A34A]' : 'text-faint'} />
             <span className={cx('text-xs font-medium', pr.approved ? 'text-[#16A34A]' : 'text-mute')}>
               {pr.approvals}/{pr.reviewers}
@@ -114,7 +127,7 @@ function useColumnScroll() {
     const section = sectionRef.current;
     const scroll = scrollRef.current;
     const content = contentRef.current;
-    const board = section?.parentElement;
+    const board = section?.closest('main') ?? section?.parentElement;
     if (!section || !scroll || !content || !board) return;
 
     const measure = () => {
@@ -200,15 +213,99 @@ export function ColumnShell({
   );
 }
 
+// Esconder e revelar coluna: o slot encolhe (ou cresce) na largura com fade, como as plataformas da tela de entrada
+// abrem e fecham. Colunas ocultas continuam montadas, com largura zero e a margem negativa anulando o espaço entre
+// colunas. A animação fica em useColumnSlots.
+export function ColumnSlot({ shown, children }: { shown: boolean; children: ReactNode }) {
+  return (
+    <div
+      data-column-slot
+      inert={!shown}
+      aria-hidden={!shown}
+      className={cx(
+        // O recorte deixa 4px de folga para o contorno de 2px das colunas destacadas não ser cortado.
+        'flex self-stretch overflow-x-clip [overflow-clip-margin:4px]',
+        shown ? 'min-w-[225px] flex-1 basis-0' : 'pointer-events-none -ml-4 w-0 min-w-0 grow-0 basis-0 opacity-0',
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+type SlotBox = { width: number; margin: number; opacity: number };
+
+const slotBoxes = (board: HTMLElement | null) =>
+  [...(board?.querySelectorAll<HTMLElement>(':scope > [data-column-slot]') ?? [])].map((slot) => {
+    const style = getComputedStyle(slot);
+    return { width: slot.offsetWidth, margin: parseFloat(style.marginLeft), opacity: parseFloat(style.opacity) };
+  });
+
+// Anima os slots da posição antiga para a nova quando o conjunto de colunas visíveis muda (`visible` identifica esse
+// conjunto). Animar a largura das colunas direto faria o board recalcular o layout de todos os cards a cada quadro e a
+// animação perderia quadros; por isso o conteúdo de cada coluna fica com largura fixa (a maior entre a antiga e a
+// nova) enquanto só o slot em volta muda de largura e recorta. O layout por quadro fica trivial.
+// A animação em curso de cada slot. Quando outra começa por cima, só a mais nova pode soltar o conteúdo.
+const slotAnimations = new WeakMap<HTMLElement, Animation>();
+
+export function useColumnSlots(board: React.RefObject<HTMLElement | null>, visible: string) {
+  const previous = useRef<{ visible: string; boxes: SlotBox[] }>({ visible, boxes: [] });
+  // Mede antes do commit, ainda com o DOM antigo.
+  if (previous.current.visible !== visible) previous.current = { visible, boxes: slotBoxes(board.current) };
+
+  useLayoutEffect(() => {
+    const before = previous.current.boxes;
+    previous.current.boxes = [];
+    if (!before.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const slots = [...(board.current?.querySelectorAll<HTMLElement>(':scope > [data-column-slot]') ?? [])];
+    const after = slotBoxes(board.current);
+    const running = slots.flatMap((slot, i) => {
+      const from = before[i];
+      const to = after[i];
+      if (!from || !to || (from.width === to.width && from.margin === to.margin)) return [];
+      const content = slot.firstElementChild as HTMLElement | null;
+      if (content) {
+        content.style.flex = 'none';
+        content.style.width = `${Math.max(from.width, to.width, 225)}px`;
+      }
+      const frame = (box: SlotBox) => ({
+        flexGrow: 0,
+        flexBasis: `${box.width}px`,
+        width: `${box.width}px`,
+        minWidth: 0,
+        marginLeft: `${box.margin}px`,
+        opacity: box.opacity,
+      });
+      const animation = slot.animate([frame(from), frame(to)], { duration: 220, easing: 'cubic-bezier(0, 0, 0.2, 1)' });
+      slotAnimations.set(slot, animation);
+      const release = () => {
+        if (slotAnimations.get(slot) !== animation) return;
+        slotAnimations.delete(slot);
+        content?.style.removeProperty('flex');
+        content?.style.removeProperty('width');
+      };
+      // Cancelada (outra troca de colunas chegou antes do fim) ou concluída, o conteúdo volta à largura normal.
+      animation.finished.then(release, release);
+      return [{ animation, release }];
+    });
+    // Solta na hora, antes de a próxima troca medir as colunas.
+    return () =>
+      running.forEach(({ animation, release }) => {
+        release();
+        animation.cancel();
+      });
+  }, [board, visible]);
+}
+
 export function EmptyState() {
   return (
     <div className="stroke fade-up flex flex-col items-center gap-2.5 rounded-lg bg-white px-5 py-8">
       <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#DCFCE7]">
         <CheckCheck size={20} className="text-[#16A34A]" />
       </span>
-      <p className="text-sm font-semibold text-ink">Nada depende de você</p>
+      <p className="text-sm font-semibold text-ink">{t('board.nothingOnYou')}</p>
       <p className="text-center text-[12.5px] leading-[1.45] text-mute">
-        Você está em dia com as revisões. Novos PRs aparecem aqui automaticamente.
+        {t('board.allCaughtUp')}
       </p>
     </div>
   );
@@ -219,13 +316,13 @@ export type ReviewerScope = 'all' | 'required';
 // Na coluna "Depende de mim": todos os PRs em que sou revisor, ou só aqueles em que meu voto é obrigatório.
 export function ReviewerScopeToggle({ value, onChange }: { value: ReviewerScope; onChange: (value: ReviewerScope) => void }) {
   const options: { id: ReviewerScope; label: string; icon: LucideIcon }[] = [
-    { id: 'all', label: 'Todos os PRs em que sou revisor', icon: Users },
-    { id: 'required', label: 'Só os PRs em que sou revisor obrigatório', icon: UserCheck },
+    { id: 'all', label: t('board.reviewerAll'), icon: Users },
+    { id: 'required', label: t('board.reviewerRequired'), icon: UserCheck },
   ];
   return (
     <div className="flex items-center justify-between gap-2 px-1.5">
-      <span className="text-xs text-mute">Como revisor</span>
-      <div role="radiogroup" aria-label="PRs em que sou revisor" className="flex gap-0.5 rounded-lg bg-[#FDEFD3] p-[3px]">
+      <span className="text-xs text-mute">{t('board.asReviewer')}</span>
+      <div role="radiogroup" aria-label={t('board.reviewerGroup')} className="flex gap-0.5 rounded-lg bg-[#FDEFD3] p-[3px]">
         {options.map((option) => {
           const selected = option.id === value;
           return (
@@ -263,7 +360,7 @@ export function OpenColumn({
   filtered,
   now,
   controls,
-  emptyNote = 'Nenhum PR com esses filtros',
+  emptyNote = t('board.noneFiltered'),
 }: {
   id: Exclude<ColumnId, 'merged' | 'release'>;
   cards: PullRequestCard[];
@@ -288,7 +385,7 @@ export function OpenColumn({
   return (
     <ColumnShell id={id} count={cards.length} top={controls}>
       {cards.map((pr) => (
-        <PrCard key={`${pr.provider}-${pr.id}`} pr={pr} now={now} />
+        <PrCard key={`${pr.provider}-${pr.repository.id}-${pr.id}`} pr={pr} now={now} />
       ))}
       {cards.length === 0 && id === 'dependsOnMe' && emptyState && <EmptyState />}
       {cards.length === 0 && filtered && <QuietNote>{emptyNote}</QuietNote>}

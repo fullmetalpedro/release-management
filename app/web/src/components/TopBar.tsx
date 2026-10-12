@@ -6,6 +6,7 @@ import { useSession } from '../lib/session';
 import { AzureDevOpsLogo, GitHubLogo, JiraLogo } from './logos';
 import { useToast } from './toast';
 import { Avatar, cx, useDropdown } from './ui';
+import { t } from '../lib/i18n';
 
 const PROVIDERS: Record<ProviderId, { name: string; logo: React.ReactNode }> = {
   'azure-devops': { name: 'Azure DevOps', logo: <AzureDevOpsLogo size={16} /> },
@@ -28,12 +29,18 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
       await queryClient.refetchQueries({ queryKey: ['me'] });
       await queryClient.resetQueries({ predicate: (query) => query.queryKey[0] !== 'auth-mode' && query.queryKey[0] !== 'me' });
     } catch (error) {
-      toast.show({ kind: 'error', title: `Não foi possível trocar para ${PROVIDERS[provider].name}`, description: (error as Error).message });
+      toast.show({ kind: 'error', title: t('account.switchFailed', { provider: PROVIDERS[provider].name }), description: (error as Error).message });
     }
   };
 
   const logout = async () => {
-    await api.logout().catch(() => undefined);
+    try {
+      await api.logout();
+    } catch (error) {
+      // A sessão continua valendo no servidor: ir para a tela de entrada só traria o usuário de volta sem explicação.
+      toast.show({ kind: 'error', title: t('account.logoutFailed'), description: (error as Error).message });
+      return;
+    }
     queryClient.clear();
     navigate('/login', { replace: true });
   };
@@ -48,12 +55,12 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate text-[13px] font-semibold text-white">{me.user.name}</span>
           <span className="text-xs text-[#8B919A]">
-            {me.mode === 'pat' ? 'Token pessoal' : 'Conectado via Microsoft'}{active && me.mode === 'pat' ? ` · ${PROVIDERS[active.provider].name}` : ''}
+            {me.mode === 'pat' ? t('account.personalToken') : t('account.viaMicrosoft')}{active && me.mode === 'pat' ? ` · ${PROVIDERS[active.provider].name}` : ''}
           </span>
         </div>
       </div>
       <div className="h-px bg-[#3A3F48]" />
-      <div className="px-2.5 pb-1.5 pt-2.5 text-[11px] font-semibold tracking-[0.6px] text-[#8B919A]">CONTAS</div>
+      <div className="px-2.5 pb-1.5 pt-2.5 text-[11px] font-semibold tracking-[0.6px] text-[#8B919A]">{t('account.accounts')}</div>
       {me.accounts.map((account) => {
         const provider = PROVIDERS[account.provider];
         const switchable = me.mode === 'pat' && account.connected && !account.active && account.provider !== 'jira';
@@ -62,7 +69,7 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
           <Row
             key={account.provider}
             {...(switchable
-              ? { type: 'button', role: 'menuitem', title: `Ver os PRs do ${provider.name}`, onClick: () => void activate(account.provider) }
+              ? { type: 'button', role: 'menuitem', title: t('account.showPrsFrom', { provider: provider.name }), onClick: () => void activate(account.provider) }
               : {})}
             className={cx(
               'flex h-12 items-center gap-2.5 rounded-md px-2.5 text-left',
@@ -92,7 +99,7 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
                 {provider.name}
               </span>
               <span className={cx('truncate text-xs', account.connected ? 'text-[#8B919A]' : 'text-[#6B7280]')}>
-                {account.connected ? account.handle : 'Nenhuma conta conectada'}
+                {account.connected ? account.handle : t('account.noAccount')}
               </span>
             </div>
             {account.active && <Check size={14} className="shrink-0 text-white" />}
@@ -106,12 +113,12 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
                   if (me.mode === 'pat') return navigate('/login');
                   toast.show({
                     kind: 'error',
-                    title: `Conexão com ${provider.name} ainda não disponível`,
-                    description: 'Entre com token pessoal para conectar outras plataformas.',
+                    title: t('account.unavailable', { provider: provider.name }),
+                    description: t('account.unavailableBody'),
                   });
                 }}
               >
-                Conectar
+                {t('account.connect')}
               </button>
             )}
           </Row>
@@ -125,7 +132,7 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
         className="hover-dark flex h-9 items-center gap-2.5 rounded-md px-2.5 text-left"
       >
         <LogOut size={16} className="text-[#8B919A]" />
-        <span className="text-[13px] font-medium text-[#D1D5DB]">Sair</span>
+        <span className="text-[13px] font-medium text-[#D1D5DB]">{t('account.signOut')}</span>
       </button>
     </div>
   );
@@ -144,7 +151,7 @@ export function TopBar() {
       <div ref={ref} className="relative flex items-center">
         <button
           type="button"
-          aria-label="Contas"
+          aria-label={t('account.menu')}
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen(!open)}

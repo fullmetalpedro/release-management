@@ -13,6 +13,7 @@
     "@fontsource-variable/inter": "^5.2.0",
     "@fontsource-variable/jetbrains-mono": "^5.2.0",
     "@tanstack/react-query": "^5.90.0",
+    "i18next": "^26.4.3",
     "lucide-react": "^0.545.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

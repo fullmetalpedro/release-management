@@ -1,6 +1,7 @@
 import { CircleCheck, CircleX, X } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { toast as sonner, Toaster } from 'sonner';
+import { t } from '../lib/i18n';
 
 export interface ToastInput {
   kind: 'success' | 'error';
@@ -46,7 +47,7 @@ function ToastCard({ id, toast }: { id: string | number; toast: ToastInput }) {
       </div>
       <button
         type="button"
-        aria-label="Fechar"
+        aria-label={t('common.close')}
         onClick={() => sonner.dismiss(id)}
         className="h-4 shrink-0 text-mute hover:text-white"
       >

@@ -7,6 +7,7 @@ import type {
   TokenSet,
 } from '../../core/ports/identityProvider.ts';
 import type { FetchLike } from '../azure-devops/client.ts';
+import { msg } from '../../i18n.ts';
 
 // Resource id fixo do Azure DevOps no Entra ID.
 export const AZURE_DEVOPS_SCOPE = '499b84ac-1321-427f-aa17-267ca6975798/user_impersonation';
@@ -78,7 +79,7 @@ export class EntraIdentityProvider implements IdentityProvider {
       redirect_uri: this.config.redirectUri,
       code_verifier: codeVerifier,
     });
-    if (!response.id_token) throw new NotAuthenticatedError('O login não devolveu a identidade do usuário');
+    if (!response.id_token) throw new NotAuthenticatedError(msg('loginNoIdentity'));
     return { tokens: this.toTokenSet(response), profile: decodeIdToken(response.id_token) };
   }
 
@@ -110,15 +111,16 @@ export class EntraIdentityProvider implements IdentityProvider {
         signal: AbortSignal.timeout(15_000),
       });
     } catch (error) {
-      throw new ProviderUnavailableError('microsoft', `Login da Microsoft indisponível: ${(error as Error).message}`);
+      throw new ProviderUnavailableError('microsoft', msg('microsoftUnavailable', { detail: (error as Error).message }));
     }
     const body = (await response.json().catch(() => ({}))) as TokenResponse;
     if (!response.ok || body.error) {
+      // A descrição que a Microsoft devolve traz ids do tenant, do aplicativo e de rastreio: fica no log do
+      // servidor, e quem usa recebe a mensagem do catálogo.
+      console.warn(`Microsoft recusou a troca de token (${response.status} ${body.error ?? ''}): ${body.error_description ?? ''}`);
       // invalid_grant cobre código expirado, refresh token revogado e consentimento retirado.
-      if (response.status === 400 || response.status === 401) {
-        throw new NotAuthenticatedError(body.error_description ?? 'A Microsoft recusou o login');
-      }
-      throw new ProviderUnavailableError('microsoft', body.error_description ?? `Microsoft respondeu ${response.status}`);
+      if (response.status === 400 || response.status === 401) throw new NotAuthenticatedError(msg('microsoftRejected'));
+      throw new ProviderUnavailableError('microsoft', msg('microsoftStatus', { status: response.status }));
     }
     return body;
   }

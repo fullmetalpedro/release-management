@@ -9,6 +9,7 @@ import type {
 } from '../../core/domain/types.ts';
 import type { WorkTracking } from '../../core/ports/workTracking.ts';
 import { isHttpStatus, JsonClient, type FetchLike } from '../http-json.ts';
+import { msg } from '../../i18n.ts';
 
 interface JiraIssueFields {
   summary: string;
@@ -31,7 +32,7 @@ const SITE = /^[a-z0-9][a-z0-9-]*\.atlassian\.net$/i;
 export function parseJiraSite(value: unknown): string {
   const site = typeof value === 'string' ? value.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase() : '';
   // O endereço vira parte de uma URL chamada pelo servidor: só sites do Jira Cloud.
-  if (!SITE.test(site)) throw new ValidationError('Informe o site do Jira, como em suaempresa.atlassian.net.');
+  if (!SITE.test(site)) throw new ValidationError(msg('jiraSiteInvalid'));
   return site;
 }
 
@@ -64,16 +65,19 @@ export interface JiraCredentials {
   email: string;
 }
 
+const CLOUD_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
 // O cloudId identifica o site na API da Atlassian; é público e resolvido uma vez, ao conectar.
 export async function resolveCloudId(site: string, fetchImpl: FetchLike = fetch): Promise<string> {
   let response: Response;
   try {
     response = await fetchImpl(`https://${site}/_edge/tenant_info`, { signal: AbortSignal.timeout(15_000) });
   } catch (error) {
-    throw new ProviderUnavailableError('jira', `Jira não respondeu: ${(error as Error).message}`);
+    throw new ProviderUnavailableError('jira', msg('providerDownDetail', { provider: 'Jira', detail: (error as Error).message }));
   }
   const info = response.ok ? ((await response.json().catch(() => ({}))) as { cloudId?: string }) : {};
-  if (!info.cloudId) throw new ValidationError(`Não encontrei um Jira em ${site}.`);
+  // O cloudId entra no endereço da API, então só serve se tiver forma de UUID.
+  if (typeof info.cloudId !== 'string' || !CLOUD_ID.test(info.cloudId)) throw new ValidationError(msg('jiraNotFound', { site }));
   return info.cloudId;
 }
 
@@ -123,15 +127,16 @@ export class JiraWorkTracking implements WorkTracking {
       const issue = await this.issue(key);
       return issue ? [this.toWorkItem(issue)] : [];
     }
-    // Aspas e barras têm significado no JQL; o texto do usuário entra como literal.
-    const literal = text.replace(/[\\"]/g, ' ').trim();
+    // Aspas, barras, parênteses e afins têm significado no JQL e na busca de texto do Jira; do que o usuário
+    // digitou só seguem letras, números, espaços, hífen e sublinhado.
+    const literal = text.replace(/[^\p{L}\p{N}\s_-]/gu, ' ').replace(/\s+/g, ' ').trim();
     if (!literal) return [];
     const issues = await this.search(`summary ~ "${literal}*" AND hierarchyLevel <= 0 ORDER BY updated DESC`, SEARCH_LIMIT);
     return issues.map((issue) => this.toWorkItem(issue));
   }
 
   async linkPullRequest(workItemId: number, ref: PullRequestRef): Promise<void> {
-    if (!ref.webUrl) throw new ValidationError('O PR não tem endereço para vincular.');
+    if (!ref.webUrl) throw new ValidationError(msg('prNoUrl'));
     await this.client.json(`/issue/${workItemId}/remotelink`, {
       method: 'POST',
       body: {
@@ -150,7 +155,7 @@ export class JiraWorkTracking implements WorkTracking {
         query: { globalId: remoteLinkGlobalId(ref) },
       });
     } catch (error) {
-      if (isHttpStatus(error, 404)) throw new NotFoundError('O vínculo não existe mais');
+      if (isHttpStatus(error, 404)) throw new NotFoundError(msg('linkGone'));
       throw error;
     }
   }
@@ -206,10 +211,10 @@ export class NoWorkTracking implements WorkTracking {
   }
 
   async linkPullRequest(): Promise<void> {
-    throw new ValidationError('Conecte o Jira para vincular issues aos PRs do GitHub.');
+    throw new ValidationError(msg('connectJira'));
   }
 
   async unlinkPullRequest(): Promise<void> {
-    throw new ValidationError('Conecte o Jira para vincular issues aos PRs do GitHub.');
+    throw new ValidationError(msg('connectJira'));
   }
 }

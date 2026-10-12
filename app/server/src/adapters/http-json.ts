@@ -1,9 +1,11 @@
 import { NotAuthenticatedError, ProviderUnavailableError } from '../core/domain/errors.ts';
+import { msg, type Localized } from '../i18n.ts';
+import { isTransientStatus, retryDelay } from './azure-devops/client.ts';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export class ProviderHttpError extends ProviderUnavailableError {
-  constructor(provider: string, status: number, message: string) {
+  constructor(provider: string, status: number, message: string | Localized) {
     super(provider, message, status);
     this.name = 'ProviderHttpError';
   }
@@ -42,7 +44,7 @@ export class JsonClient {
   async send(path: string, request: JsonRequest = {}): Promise<Response> {
     const { provider, label, fetchImpl = fetch, timeoutMs = 20_000, readRetries = 4, retryDelayMs = 300 } = this.options;
     const method = request.method ?? 'GET';
-    const url = new URL(path.startsWith('http') ? path : this.options.baseUrl + path);
+    const url = new URL(this.options.baseUrl + path);
     for (const [key, value] of Object.entries(request.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
@@ -56,24 +58,27 @@ export class JsonClient {
     const attempts = method === 'GET' || request.readOnly ? 1 + readRetries : 1;
     let response: Response | undefined;
     for (let attempt = 1; !response; attempt++) {
+      let received: Response | undefined;
       try {
-        response = await fetchImpl(url.toString(), {
+        received = await fetchImpl(url.toString(), {
           method,
           headers,
           body: request.body !== undefined ? JSON.stringify(request.body) : undefined,
+          // O token não acompanha redirecionamentos.
           redirect: 'manual',
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (error) {
         if (attempt >= attempts) {
-          throw new ProviderUnavailableError(provider, `${label} não respondeu: ${(error as Error).message}`);
+          throw new ProviderUnavailableError(provider, msg('providerDownDetail', { provider: label, detail: (error as Error).message }));
         }
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
       }
+      if (received && (attempt >= attempts || !isTransientStatus(received.status))) response = received;
+      else await new Promise((resolve) => setTimeout(resolve, retryDelay(received, attempt, retryDelayMs)));
     }
-    if (response.status === 401 || (response.status >= 300 && response.status < 400)) {
-      throw new NotAuthenticatedError(`O ${label} recusou o token da sessão`);
-    }
+    // Um 3xx aqui não é token recusado: o GitHub responde 301 para branch ou repositório renomeado. Ele segue
+    // como erro HTTP comum, para quem chamou decidir.
+    if (response.status === 401) throw new NotAuthenticatedError(msg('sessionTokenRejected', { provider: label }));
     return response;
   }
 
@@ -81,7 +86,8 @@ export class JsonClient {
     const response = await this.send(path, request);
     if (!response.ok) {
       const detail = (await response.json().catch(() => ({}))) as { message?: string; errorMessages?: string[] };
-      const message = detail.message ?? detail.errorMessages?.join(' ') ?? `${this.options.label} respondeu ${response.status}`;
+      const message =
+        detail.message ?? detail.errorMessages?.join(' ') ?? msg('providerStatus', { provider: this.options.label, status: response.status });
       throw new ProviderHttpError(this.options.provider, response.status, message);
     }
     if (response.status === 204) return undefined as T;

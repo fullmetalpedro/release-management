@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { PersonView, ReleaseView } from './api';
+import { currentLocale, localeTag, t, type Locale } from './i18n';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -13,45 +14,49 @@ export function initials(name: string): string {
   return (first + last).toUpperCase();
 }
 
-// Idade do PR como no card: 3h, 1d, 6d.
+// Idade do PR como no card: 3h, 1d, 6d (em francês, 3 h e 1 j).
 export function age(iso: string, now = Date.now()): string {
   const elapsed = Math.max(0, now - new Date(iso).getTime());
-  if (elapsed < HOUR) return `${Math.max(1, Math.floor(elapsed / MINUTE))}min`;
-  if (elapsed < DAY) return `${Math.floor(elapsed / HOUR)}h`;
-  return `${Math.floor(elapsed / DAY)}d`;
+  if (elapsed < HOUR) return t('time.ageMinutes', { count: Math.max(1, Math.floor(elapsed / MINUTE)) });
+  if (elapsed < DAY) return t('time.ageHours', { count: Math.floor(elapsed / HOUR) });
+  return t('time.ageDays', { count: Math.floor(elapsed / DAY) });
 }
+
+// Dia e mês no costume de cada idioma: 08/10, Oct 8, 8 oct.
+const SHORT_DATE: Record<Locale, Intl.DateTimeFormatOptions> = {
+  pt: { day: '2-digit', month: '2-digit' },
+  en: { month: 'short', day: 'numeric' },
+  fr: { day: 'numeric', month: 'short' },
+};
 
 export function shortDate(iso: string | undefined): string {
   if (!iso) return '—';
-  const date = new Date(iso);
-  return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+  return new Intl.DateTimeFormat(localeTag(), SHORT_DATE[currentLocale()]).format(new Date(iso));
 }
 
 export function elapsedLabel(iso: string, now = Date.now()): string {
   const minutes = Math.floor(Math.max(0, now - new Date(iso).getTime()) / MINUTE);
-  if (minutes < 1) return 'agora';
-  if (minutes < 60) return `há ${minutes} min`;
+  if (minutes < 1) return t('time.justNow');
+  if (minutes < 60) return t('time.minutesAgo', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `há ${hours} h` : `há ${Math.floor(hours / 24)} d`;
+  return hours < 24 ? t('time.hoursAgo', { count: hours }) : t('time.daysAgo', { count: Math.floor(hours / 24) });
 }
 
 export function authorLabel(person: PersonView): string {
-  return person.isMe ? 'Você' : person.name;
+  return person.isMe ? t('common.you') : person.name;
 }
 
-export function plural(count: number, singular: string, pluralForm: string): string {
-  return `${count} ${count === 1 ? singular : pluralForm}`;
-}
-
-// "Criada em 08/10 por Manoel Martins a partir de develop" / "Criada agora por você a partir de main".
-export function releaseMeta(release: ReleaseView, now = Date.now(), capitalize = true): string {
-  const parts = [capitalize ? 'Criada' : 'criada'];
+// "Criada em 08/10 por Manoel Martins a partir de develop" / "Created just now by you from main".
+export function releaseMeta(release: ReleaseView, now = Date.now()): string {
+  const parts = [t('releaseMeta.created')];
   if (release.createdAt) {
     const recent = now - new Date(release.createdAt).getTime() < 5 * MINUTE;
-    parts.push(recent ? 'agora' : `em ${shortDate(release.createdAt)}`);
+    parts.push(recent ? t('releaseMeta.now') : t('releaseMeta.on', { date: shortDate(release.createdAt) }));
   }
-  if (release.createdBy) parts.push(`por ${release.createdBy.isMe ? 'você' : release.createdBy.name}`);
-  if (release.baseBranch) parts.push(`a partir de ${release.baseBranch}`);
+  if (release.createdBy) {
+    parts.push(release.createdBy.isMe ? t('releaseMeta.byMe') : t('releaseMeta.by', { name: release.createdBy.name }));
+  }
+  if (release.baseBranch) parts.push(t('releaseMeta.from', { branch: release.baseBranch }));
   return parts.length > 1 ? parts.join(' ') : '';
 }
 
@@ -65,11 +70,15 @@ export function useNow(intervalMs = 30_000): number {
   return now;
 }
 
-export function useStoredState<T>(key: string, initial: T): [T, (value: T) => void] {
+// `isValid` confere o formato do que estava guardado: uma versão antiga da aplicação (ou outra aba) pode ter
+// gravado algo que esta não entende, e aí vale o valor inicial.
+export function useStoredState<T>(key: string, initial: T, isValid?: (value: unknown) => value is T): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(() => {
     try {
       const raw = localStorage.getItem(key);
-      return raw === null ? initial : (JSON.parse(raw) as T);
+      if (raw === null) return initial;
+      const stored: unknown = JSON.parse(raw);
+      return !isValid || isValid(stored) ? (stored as T) : initial;
     } catch {
       return initial;
     }

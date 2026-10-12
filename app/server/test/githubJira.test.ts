@@ -361,8 +361,8 @@ describe('Jira', () => {
     for (const bad of ['evil.com', 'muralis.atlassian.net.evil.com', 'localhost', '', 42]) {
       expect(() => parseJiraSite(bad), String(bad)).toThrow(ValidationError);
     }
-    const { fetchImpl } = fake({ 'GET /_edge/tenant_info': () => ({ cloudId: 'cloud-1' }) });
-    expect(await resolveCloudId('muralis.atlassian.net', fetchImpl)).toBe('cloud-1');
+    const { fetchImpl } = fake({ 'GET /_edge/tenant_info': () => ({ cloudId: '11111111-2222-3333-4444-555555555555' }) });
+    expect(await resolveCloudId('muralis.atlassian.net', fetchImpl)).toBe('11111111-2222-3333-4444-555555555555');
     await expect(resolveCloudId('naoexiste.atlassian.net', fake({}).fetchImpl)).rejects.toThrow('Não encontrei um Jira');
   });
 
@@ -424,7 +424,7 @@ describe('Jira', () => {
       'GET /issue/PROJ-7': () => issue('1007', 'PROJ-7', 'Exportar', story, doing),
     });
     await tracking.searchWorkItems('muralis', 'relatório "x" \\ y');
-    expect(calls[0]!.body).toMatchObject({ jql: 'summary ~ "relatório  x    y*" AND hierarchyLevel <= 0 ORDER BY updated DESC', maxResults: 8 });
+    expect(calls[0]!.body).toMatchObject({ jql: 'summary ~ "relatório x y*" AND hierarchyLevel <= 0 ORDER BY updated DESC', maxResults: 8 });
     expect((await tracking.searchWorkItems('muralis', 'proj-7')).map((w) => w.key)).toEqual(['PROJ-7']);
   });
 

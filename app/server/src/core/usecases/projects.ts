@@ -1,3 +1,4 @@
+import { mapLimit } from '../concurrency.ts';
 import type { SourceControl } from '../ports/sourceControl.ts';
 
 export interface ProjectView {
@@ -17,11 +18,9 @@ export async function listProjects(
   // Numa organização em que nenhum nome configurado existe, mostrar tudo é melhor que um seletor vazio.
   const selected = matched.length > 0 ? matched : [...all].sort((a, b) => a.name.localeCompare(b.name));
 
-  return Promise.all(
-    selected.map(async (project) => ({
-      id: project.id,
-      name: project.name,
-      openPullRequests: await deps.sourceControl.countOpenPullRequests(project.id),
-    })),
-  );
+  return mapLimit(selected, 4, async (project) => ({
+    id: project.id,
+    name: project.name,
+    openPullRequests: await deps.sourceControl.countOpenPullRequests(project.id),
+  }));
 }

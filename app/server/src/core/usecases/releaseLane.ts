@@ -4,6 +4,7 @@ import type { Person, PullRequest, ReleaseBranch, Repository } from '../domain/t
 import type { SourceControl } from '../ports/sourceControl.ts';
 import { toPersonView, type PersonView } from './board.ts';
 import { compareVersionsDesc, isValidBranchName, nextReleaseName } from './releaseNaming.ts';
+import { msg } from '../../i18n.ts';
 
 export interface BranchingConfig {
   developBranch: string;
@@ -78,7 +79,7 @@ export async function findRepository(
 ): Promise<Repository> {
   const repositories = await sourceControl.listRepositories(projectId);
   const repository = repositories.find((r) => r.id === repositoryId);
-  if (!repository) throw new NotFoundError('Repositório não encontrado');
+  if (!repository) throw new NotFoundError(msg('repositoryNotFound'));
   return repository;
 }
 
@@ -203,17 +204,21 @@ export async function createRelease(
 ): Promise<{ name: string; pullRequests: number; repository: string; webUrl: string }> {
   const { sourceControl } = deps;
   const name = input.name.trim();
-  if (!isValidBranchName(name)) throw new ValidationError('Nome de branch inválido');
+  if (!isValidBranchName(name)) throw new ValidationError(msg('invalidBranchName'));
+  // Fora do padrão a branch seria criada, mas nunca reconhecida como release.
+  if (!new RegExp(input.branching.releasePattern).test(name)) {
+    throw new ValidationError(msg('branchOutsidePattern', { branch: name }));
+  }
   const ids = [...new Set(input.pullRequestIds)];
-  if (ids.length === 0) throw new ValidationError('Selecione ao menos um PR');
+  if (ids.length === 0) throw new ValidationError(msg('selectAtLeastOnePr'));
 
   const repository = await findRepository(sourceControl, input.projectId, input.repositoryId);
   const existing = await sourceControl.listReleaseBranches(repository);
-  if (existing.some((b) => b.name === name)) throw new ValidationError(`A branch ${name} já existe`);
+  if (existing.some((b) => b.name === name)) throw new ValidationError(msg('branchExists', { branch: name }));
 
   const pullRequests = await sourceControl.getPullRequests(repository, ids);
   if (pullRequests.length !== ids.length || pullRequests.some((pr) => pr.status !== 'merged')) {
-    throw new ValidationError('Só PRs mergeados podem entrar na release');
+    throw new ValidationError(msg('onlyMergedPrs'));
   }
   // Aplicar na ordem em que foram mergeados reduz conflitos entre os próprios PRs.
   const ordered = [...pullRequests].sort((a, b) => (a.closedAt ?? '').localeCompare(b.closedAt ?? ''));

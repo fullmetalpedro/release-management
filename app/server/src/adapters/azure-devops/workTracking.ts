@@ -7,10 +7,12 @@ import type {
   WorkItemSummary,
 } from '../../core/domain/types.ts';
 import type { WorkTracking } from '../../core/ports/workTracking.ts';
-import { AzureDevOpsHttpError, type AzureDevOpsClient } from './client.ts';
+import { AzureDevOpsHttpError, isTransientStatus, type AzureDevOpsClient } from './client.ts';
+import { msg } from '../../i18n.ts';
 
 interface AdoWorkItem {
   id: number;
+  rev?: number;
   fields: {
     'System.Title': string;
     'System.WorkItemType': string;
@@ -33,7 +35,9 @@ export function toKind(typeName: string): WorkItemKind {
 
 // Os estados são do processo de cada projeto; o nome decide "em teste" e a categoria do Azure DevOps decide o resto.
 export function toStateCategory(stateName: string, adoCategory: string | undefined): WorkItemStateCategory {
-  if (/test|homolog|\bqa\b|valida/i.test(stateName)) return 'testing';
+  // Um estado já concluído ou removido não volta a ser "em teste" só por se chamar "Testado" ou "Validado".
+  const finished = adoCategory === 'Completed' || adoCategory === 'Removed';
+  if (!finished && /test|homolog|\bqa\b|valida/i.test(stateName)) return 'testing';
   switch (adoCategory) {
     case 'Completed':
       return 'done';
@@ -62,7 +66,7 @@ export class AzureDevOpsWorkTracking implements WorkTracking {
 
   async listWorkItemsForPullRequest(ref: PullRequestRef): Promise<WorkItem[]> {
     const { value } = await this.client.get<{ value: { id: string }[] }>(
-      `/${ref.projectId}/_apis/git/repositories/${ref.repositoryId}/pullRequests/${ref.pullRequestId}/workitems`,
+      `/${encodeURIComponent(ref.projectId)}/_apis/git/repositories/${encodeURIComponent(ref.repositoryId)}/pullRequests/${ref.pullRequestId}/workitems`,
     );
     return this.load(value.map((item) => Number(item.id)));
   }
@@ -71,7 +75,7 @@ export class AzureDevOpsWorkTracking implements WorkTracking {
     const match = /^\d+$/.test(term)
       ? `[System.Id] = ${Number(term)}`
       : `[System.Title] CONTAINS '${term.replaceAll("'", "''")}'`;
-    const { workItems } = await this.client.post<{ workItems: { id: number }[] }>(`/${projectId}/_apis/wit/wiql`, {
+    const { workItems } = await this.client.post<{ workItems: { id: number }[] }>(`/${encodeURIComponent(projectId)}/_apis/wit/wiql`, {
       query: { $top: SEARCH_LIMIT },
       readOnly: true,
       body: {
@@ -106,10 +110,15 @@ export class AzureDevOpsWorkTracking implements WorkTracking {
     const index = (item.relations ?? []).findIndex(
       (relation) => relation.rel === 'ArtifactLink' && relation.url.toLowerCase() === target,
     );
-    if (index < 0) throw new NotFoundError('O vínculo não existe mais');
+    if (index < 0) throw new NotFoundError(msg('linkGone'));
     await this.client.patch(`/_apis/wit/workitems/${workItemId}`, {
       contentType: 'application/json-patch+json',
-      body: [{ op: 'remove', path: `/relations/${index}` }],
+      // O índice vale para a revisão lida; se o item mudou nesse meio-tempo, o provedor recusa em vez de remover
+      // o vínculo errado.
+      body: [
+        ...(item.rev !== undefined ? [{ op: 'test', path: '/rev', value: item.rev }] : []),
+        { op: 'remove', path: `/relations/${index}` },
+      ],
     });
   }
 
@@ -157,6 +166,9 @@ export class AzureDevOpsWorkTracking implements WorkTracking {
         )
         .then(({ value }) => new Map(value.map((s) => [s.name, s.category])))
         .catch((error) => {
+          // Só a resposta definitiva fica guardada; falha passageira é tentada de novo na próxima vez.
+          if (error instanceof AzureDevOpsHttpError && !isTransientStatus(error.status)) return new Map<string, string>();
+          this.stateCategories.delete(key);
           if (error instanceof AzureDevOpsHttpError) return new Map<string, string>();
           throw error;
         });

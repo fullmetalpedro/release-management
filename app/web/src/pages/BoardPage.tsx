@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   COLUMNS,
+  ColumnSlot,
+  useColumnSlots,
   OpenColumn,
   ReviewerScopeToggle,
   type ColumnId,
@@ -22,14 +24,22 @@ import {
 } from '../components/toolbar';
 import { TopBar } from '../components/TopBar';
 import { api, ApiError, type BoardColumnId, type PullRequestCard } from '../lib/api';
-import { elapsedLabel, plural, useNow, useStoredState } from '../lib/format';
+import { elapsedLabel, useNow, useStoredState } from '../lib/format';
 import { LANE_STALE_MS, laneKey, SYNC_INTERVAL_MS, useAllLanes } from '../lib/lanes';
 import { useSession } from '../lib/session';
+import { t } from '../lib/i18n';
 
 const OPEN_COLUMNS: BoardColumnId[] = ['dependsOnMe', 'review', 'conflict', 'ready'];
 
 // Valor do filtro de autor para "os meus PRs"; os demais autores são filtrados pelo nome.
 const AUTHOR_ME = '@me';
+
+// Formato das preferências guardadas no navegador.
+const isColumnList = (value: unknown): value is ColumnId[] =>
+  Array.isArray(value) && value.every((id) => COLUMNS.some((column) => column.id === id));
+const isLaneChoice = (value: unknown): value is Record<string, { merged?: string; release?: string }> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) && Object.values(value).every((v) => typeof v === 'object' && v !== null);
+const isReviewerScope = (value: unknown): value is ReviewerScope => value === 'all' || value === 'required';
 
 export function BoardPage() {
   const { me, project, projects, projectsLoading, selectProject } = useSession();
@@ -39,13 +49,13 @@ export function BoardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [repositoryFilter, setRepositoryFilter] = useState<string | null>(null);
-  const [targetFilter, setTargetFilter] = useState<string | null>(null);
-  const [authorFilter, setAuthorFilter] = useState<string | null>(null);
+  const [chosenRepository, setRepositoryFilter] = useState<string | null>(null);
+  const [chosenTarget, setTargetFilter] = useState<string | null>(null);
+  const [chosenAuthor, setAuthorFilter] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [hidden, setHidden] = useStoredState<ColumnId[]>('rm.hiddenColumns', []);
-  const [laneRepos, setLaneRepos] = useStoredState<Record<string, { merged?: string; release?: string }>>('rm.laneRepos', {});
-  const [reviewerScope, setReviewerScope] = useStoredState<ReviewerScope>('rm.reviewerScope', 'all');
+  const [hidden, setHidden] = useStoredState<ColumnId[]>('rm.hiddenColumns', [], isColumnList);
+  const [laneRepos, setLaneRepos] = useStoredState<Record<string, { merged?: string; release?: string }>>('rm.laneRepos', {}, isLaneChoice);
+  const [reviewerScope, setReviewerScope] = useStoredState<ReviewerScope>('rm.reviewerScope', 'all', isReviewerScope);
   const [createState, setCreateState] = useState<CreateState>({ status: 'idle' });
   const [justCreated, setJustCreated] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -91,23 +101,28 @@ export function BoardPage() {
   const mergedLane = useQuery(laneOptions(mergedRepo));
   const releaseLane = useQuery(laneOptions(releaseRepo));
 
+  // O projeto vai junto com o pedido: se o usuário trocar de projeto no meio, a resposta (e o "Tentar de novo")
+  // continua valendo para o projeto em que a release foi pedida.
   const create = useMutation({
-    mutationFn: (input: { repositoryId: string; name: string; pullRequestIds: number[] }) =>
-      api.createRelease(projectId!, input.repositoryId, input.name, input.pullRequestIds),
+    mutationFn: (input: { projectId: string; repositoryId: string; name: string; pullRequestIds: number[] }) =>
+      api.createRelease(input.projectId, input.repositoryId, input.name, input.pullRequestIds),
     onMutate: () => setCreateState({ status: 'creating' }),
     onSuccess: async (created, input) => {
-      setLaneRepo('release', input.repositoryId);
-      await queryClient.invalidateQueries({ queryKey: ['lane', projectId] });
+      if (input.projectId === projectId) setLaneRepo('release', input.repositoryId);
+      // A tela cheia da release guarda a própria cópia; sem isto ela mostraria a release anterior como a última.
+      void queryClient.invalidateQueries({ queryKey: ['release', input.projectId] });
+      void queryClient.invalidateQueries({ queryKey: ['lanes', input.projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['lane', input.projectId] });
       setCreateState({ status: 'idle' });
       setJustCreated(true);
       clearTimeout(highlightTimer.current);
       highlightTimer.current = setTimeout(() => setJustCreated(false), 9000);
       toast.show({
         kind: 'success',
-        title: `Branch ${created.name} criada`,
-        description: `${plural(created.pullRequests, 'PR incluído', 'PRs incluídos')} via cherry-pick em ${created.repository}.`,
+        title: t('board.branchCreated', { name: created.name }),
+        description: t('board.branchCreatedBody', { count: created.pullRequests, repository: created.repository }),
         action: {
-          label: 'Ver release',
+          label: t('board.viewRelease'),
           onClick: () =>
             navigate(`/release?repo=${encodeURIComponent(input.repositoryId)}&branch=${encodeURIComponent(created.name)}`),
         },
@@ -119,14 +134,36 @@ export function BoardPage() {
       setCreateState({ status: 'failed', conflictingId });
       toast.show({
         kind: 'error',
-        title: 'Não foi possível criar a branch',
+        title: t('board.createFailed'),
         description: conflict
-          ? `Conflito ao aplicar #${conflictingId} sobre ${String(error.details.baseBranch)}. Remova o PR da seleção ou resolva o conflito.`
+          ? t('board.conflictBody', { id: conflictingId, base: String(error.details.baseBranch) })
           : error.message,
-        action: { label: 'Tentar novamente', onClick: () => create.mutate(input) },
+        action: { label: t('common.retry'), onClick: () => create.mutate(input) },
       });
     },
   });
+
+  const allOpen = useMemo(() => OPEN_COLUMNS.flatMap((id) => board.data?.columns[id] ?? []), [board.data]);
+  const targets = useMemo(
+    () => [...new Set(allOpen.map((pr) => pr.targetBranch))].sort().map((name) => ({ id: name, name })),
+    [allOpen],
+  );
+  // "Você" primeiro, depois os colegas com PR aberto, em ordem alfabética.
+  const authors = useMemo(() => {
+    const others = new Map(allOpen.filter((pr) => !pr.author.isMe).map((pr) => [pr.author.name, pr.author]));
+    return [
+      { id: AUTHOR_ME, name: t('common.you'), person: { name: me.user.name, isMe: true, avatarKey: me.user.avatarKey } },
+      ...[...others.values()]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((author) => ({ id: author.name, name: author.name, person: author })),
+    ];
+  }, [allOpen, me.user.name, me.user.avatarKey]);
+  // Um filtro só vale enquanto a opção existe: se o último PR daquele autor foi mergeado, o filtro deixa de agir
+  // (e o botão já mostra "todos"), em vez de esvaziar o board sem explicação.
+  const exists = (options: { id: string }[], value: string | null) => (options.some((option) => option.id === value) ? value : null);
+  const repositoryFilter = exists(repositories, chosenRepository);
+  const targetFilter = exists(targets, chosenTarget);
+  const authorFilter = exists(authors, chosenAuthor);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -138,7 +175,7 @@ export function BoardPage() {
         pr.title.toLowerCase().includes(term) ||
         `#${pr.id}`.includes(term) ||
         pr.author.name.toLowerCase().includes(term) ||
-        (pr.author.isMe && 'você'.includes(term)));
+        (pr.author.isMe && t('common.you').toLowerCase().includes(term)));
     const columns = board.data?.columns;
     const result = Object.fromEntries(OPEN_COLUMNS.map((id) => [id, (columns?.[id] ?? []).filter(matches)])) as Record<
       BoardColumnId,
@@ -151,21 +188,6 @@ export function BoardPage() {
     return result;
   }, [board.data, authorFilter, repositoryFilter, targetFilter, search, reviewerScope]);
 
-  const allOpen = useMemo(() => OPEN_COLUMNS.flatMap((id) => board.data?.columns[id] ?? []), [board.data]);
-  const targets = useMemo(
-    () => [...new Set(allOpen.map((pr) => pr.targetBranch))].sort().map((name) => ({ id: name, name })),
-    [allOpen],
-  );
-  // "Você" primeiro, depois os colegas com PR aberto, em ordem alfabética.
-  const authors = useMemo(() => {
-    const others = new Map(allOpen.filter((pr) => !pr.author.isMe).map((pr) => [pr.author.name, pr.author]));
-    return [
-      { id: AUTHOR_ME, name: 'Você', person: { name: me.user.name, isMe: true, avatarKey: me.user.avatarKey } },
-      ...[...others.values()]
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((author) => ({ id: author.name, name: author.name, person: author })),
-    ];
-  }, [allOpen, me.user.name, me.user.avatarKey]);
   const dependsOnMe = (board.data?.columns.dependsOnMe ?? []).filter(
     (pr) => reviewerScope === 'all' || pr.reason !== 'reviewer' || pr.requiredReviewer,
   ).length;
@@ -175,12 +197,19 @@ export function BoardPage() {
   const isFiltered =
     !!repositoryFilter || !!targetFilter || !!authorFilter || search.trim() !== '';
 
-  const loading = !board.data && (board.isPending || projectsLoading) && !board.isError;
+  // Sem projeto a consulta do board nem começa: não há o que esperar.
+  const loading = !board.data && !board.isError && (projectsLoading || (!!projectId && board.isPending));
   const syncing = board.isFetching || allLanes.isFetching || mergedLane.isFetching || releaseLane.isFetching;
+  const mergedFailed = !mergedLane.data && (mergedLane.isError || (allLanes.isError && !mergedLane.isFetching));
+  const releaseFailed = !releaseLane.data && (releaseLane.isError || (allLanes.isError && !releaseLane.isFetching));
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['projects'] });
     void board.refetch();
-    void allLanes.refetch();
+    // O lote semeia as raias de cada repositório; as que falharam nele são buscadas de novo uma a uma.
+    void allLanes.refetch().then(() => {
+      if (mergedLane.isError) void mergedLane.refetch();
+      if (releaseLane.isError) void releaseLane.refetch();
+    });
   };
 
   const counts: Partial<Record<ColumnId, number>> = board.data
@@ -191,6 +220,68 @@ export function BoardPage() {
       }
     : {};
   const show = (id: ColumnId) => !hidden.includes(id);
+  const boardRef = useRef<HTMLElement>(null);
+  useColumnSlots(boardRef, COLUMNS.filter((column) => show(column.id)).map((column) => column.id).join());
+
+  const renderColumn = (column: (typeof COLUMNS)[number]) => {
+    if (column.id === 'merged') {
+      return (
+        <MergedColumn
+          // Seleção e nome de branch são do repositório: trocar de repositório recomeça os dois. No GitHub o
+          // número do PR se repete entre repositórios, e um PR marcado num não pode chegar marcado no outro.
+          key={mergedRepo}
+          repositories={repositories}
+          repositoryId={mergedRepo}
+          onRepositoryChange={(id) => {
+            setLaneRepo('merged', id);
+            setCreateState({ status: 'idle' });
+          }}
+          lane={mergedLane.data}
+          loading={loading || (!mergedLane.data && !!mergedRepo && (allLanes.isPending || mergedLane.isFetching))}
+          failed={mergedFailed}
+          state={createState}
+          onSelectionChange={() => createState.status === 'failed' && setCreateState({ status: 'idle' })}
+          onCreate={(name, pullRequestIds) =>
+            projectId && mergedRepo && create.mutate({ projectId, repositoryId: mergedRepo, name, pullRequestIds })
+          }
+        />
+      );
+    }
+    if (column.id === 'release') {
+      return (
+        <ReleaseColumn
+          repositories={repositories}
+          repositoryId={releaseRepo}
+          onRepositoryChange={(id) => setLaneRepo('release', id)}
+          lane={releaseLane.data}
+          loading={loading || (!releaseLane.data && !!releaseRepo && (allLanes.isPending || releaseLane.isFetching))}
+          failed={releaseFailed}
+          highlight={justCreated}
+          now={now}
+        />
+      );
+    }
+    return (
+      <OpenColumn
+        id={column.id}
+        cards={filtered[column.id]}
+        loading={loading}
+        emptyState={!!board.data && !isFiltered && !(column.id === 'dependsOnMe' && optionalHidden)}
+        filtered={isFiltered || (column.id === 'dependsOnMe' && optionalHidden)}
+        emptyNote={
+          column.id === 'dependsOnMe' && optionalHidden && !isFiltered
+            ? t('board.noneRequired')
+            : undefined
+        }
+        controls={
+          column.id === 'dependsOnMe' && !loading ? (
+            <ReviewerScopeToggle value={reviewerScope} onChange={setReviewerScope} />
+          ) : undefined
+        }
+        now={now}
+      />
+    );
+  };
 
   return (
     <div data-page="board" className="flex h-full min-h-[560px] flex-col">
@@ -199,20 +290,20 @@ export function BoardPage() {
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 px-8 pb-5 pt-7">
         <div className="flex flex-col gap-2.5">
           <ProjectSwitcher projects={projects} current={project} loading={projectsLoading} onSelect={selectProject} />
-          <h1 className="text-2xl font-bold tracking-[-0.3px] text-ink">Code review</h1>
+          <h1 className="text-2xl font-bold tracking-[-0.3px] text-ink">{t('board.title')}</h1>
           <div className="flex h-4 items-center gap-2 text-[13px]">
             {loading || !board.data ? null : (
               <>
                 <span className="font-medium text-ink-2">
-                  {plural(allOpen.length, 'PR aberto', 'PRs abertos')}
+                  {t('board.openPrs', { count: allOpen.length })}
                 </span>
                 <span className="text-[#CBD5E1]">·</span>
                 {dependsOnMe > 0 ? (
                   <span className="font-semibold text-[#B45309]">
-                    {plural(dependsOnMe, 'depende de você', 'dependem de você')}
+                    {t('board.waitingOnYou', { count: dependsOnMe })}
                   </span>
                 ) : (
-                  <span className="font-semibold text-[#16A34A]">Nada depende de você</span>
+                  <span className="font-semibold text-[#16A34A]">{t('board.nothingOnYou')}</span>
                 )}
               </>
             )}
@@ -222,8 +313,8 @@ export function BoardPage() {
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2.5">
           <FilterSelect
             icon={AuthorIcon}
-            label="Autor"
-            allLabel="todos"
+            label={t('board.author')}
+            allLabel={t('board.allAuthors')}
             options={authors}
             value={authorFilter}
             onChange={setAuthorFilter}
@@ -231,16 +322,16 @@ export function BoardPage() {
           />
           <FilterSelect
             icon={RepositoryIcon}
-            label="Repositório"
-            allLabel="todos"
+            label={t('board.repository')}
+            allLabel={t('board.allRepositories')}
             options={repositories}
             value={repositoryFilter}
             onChange={setRepositoryFilter}
           />
           <FilterSelect
             icon={TargetIcon}
-            label="Destino"
-            allLabel="todas"
+            label={t('board.target')}
+            allLabel={t('board.allTargets')}
             options={targets}
             value={targetFilter}
             onChange={setTargetFilter}
@@ -249,7 +340,7 @@ export function BoardPage() {
           <SearchBox value={search} onChange={setSearch} />
           <SyncControls
             syncing={syncing}
-            failed={board.isError}
+            failed={board.isError || mergedFailed || releaseFailed}
             lastSync={board.data && elapsedLabel(board.data.syncedAt, now)}
             onRefresh={refresh}
           />
@@ -257,64 +348,14 @@ export function BoardPage() {
       </div>
 
       {/* O board não rola na vertical: cada coluna cuida do próprio conteúdo. */}
-      <main className="column-scroll flex min-h-0 flex-1 items-start gap-4 overflow-x-auto overflow-y-hidden px-8 pb-8">
-        {COLUMNS.filter((column) => show(column.id)).map((column) => {
-          if (column.id === 'merged') {
-            return (
-              <MergedColumn
-                key={column.id}
-                repositories={repositories}
-                repositoryId={mergedRepo}
-                onRepositoryChange={(id) => {
-                  setLaneRepo('merged', id);
-                  setCreateState({ status: 'idle' });
-                }}
-                lane={mergedLane.data}
-                loading={loading || (!mergedLane.data && !!mergedRepo && (allLanes.isPending || mergedLane.isFetching))}
-                state={createState}
-                onSelectionChange={() => createState.status === 'failed' && setCreateState({ status: 'idle' })}
-                onCreate={(name, pullRequestIds) =>
-                  mergedRepo && create.mutate({ repositoryId: mergedRepo, name, pullRequestIds })
-                }
-              />
-            );
-          }
-          if (column.id === 'release') {
-            return (
-              <ReleaseColumn
-                key={column.id}
-                repositories={repositories}
-                repositoryId={releaseRepo}
-                onRepositoryChange={(id) => setLaneRepo('release', id)}
-                lane={releaseLane.data}
-                loading={loading || (!releaseLane.data && !!releaseRepo && (allLanes.isPending || releaseLane.isFetching))}
-                highlight={justCreated}
-                now={now}
-              />
-            );
-          }
-          return (
-            <OpenColumn
-              key={column.id}
-              id={column.id}
-              cards={filtered[column.id]}
-              loading={loading}
-              emptyState={!!board.data && !isFiltered && !(column.id === 'dependsOnMe' && optionalHidden)}
-              filtered={isFiltered || (column.id === 'dependsOnMe' && optionalHidden)}
-              emptyNote={
-                column.id === 'dependsOnMe' && optionalHidden && !isFiltered
-                  ? 'Nenhum PR em que você é revisor obrigatório.'
-                  : undefined
-              }
-              controls={
-                column.id === 'dependsOnMe' && !loading ? (
-                  <ReviewerScopeToggle value={reviewerScope} onChange={setReviewerScope} />
-                ) : undefined
-              }
-              now={now}
-            />
-          );
-        })}
+      {/* O respiro de 2px no topo deixa inteiro o contorno de 2px das colunas destacadas (o board corta o que passa da borda). */}
+      <main ref={boardRef} className="column-scroll flex min-h-0 flex-1 items-start gap-4 overflow-x-auto overflow-y-hidden px-8 pb-8 pt-0.5">
+        {/* Colunas ocultas continuam montadas: assim esconder e revelar podem animar. */}
+        {COLUMNS.map((column) => (
+          <ColumnSlot key={column.id} shown={show(column.id)}>
+            {renderColumn(column)}
+          </ColumnSlot>
+        ))}
       </main>
     </div>
   );

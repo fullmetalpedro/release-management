@@ -19,13 +19,14 @@ import { cx } from '../components/ui';
 import type { Me, ProviderId } from '../lib/api';
 import { connectPlatform, type PlatformAccount } from '../lib/pat';
 import { useMe } from '../lib/session';
+import { t } from '../lib/i18n';
 
 interface Guide {
   title: string;
   description: string;
   link: (organization: string) => { label: string; href: string };
   steps: [string, string, string, string, string];
-  scopes: { name: string; level: string; description: string; mono?: boolean }[];
+  scopes: { name: string; level: string; description: string; mono?: boolean; write?: boolean }[];
   note: string;
 }
 
@@ -36,76 +37,48 @@ const PLATFORMS: { id: ProviderId; name: string; logo: (size: number) => ReactNo
   { id: 'jira', name: 'Jira', logo: (size) => <JiraLogo size={size} /> },
 ];
 
-const GUIDES: Record<ProviderId, Guide> = {
-  'azure-devops': {
-    title: 'Token do Azure DevOps',
-    description:
-      'O token vale para uma organização só. Para trocar de organização, gere um novo token nela e conecte no lugar do atual.',
-    link: (organization) => ({
-      label: `dev.azure.com/${organization || '{org}'}/_usersSettings/tokens`,
-      href: organization
-        ? `https://dev.azure.com/${encodeURIComponent(organization)}/_usersSettings/tokens`
-        : 'https://dev.azure.com',
-    }),
-    steps: [
-      'Abra a página de tokens da organização no Azure DevOps.',
-      'Clique em New Token e, em Organization, escolha a organização que você quer usar. Não use All accessible organizations.',
-      'Defina a validade. A política da organização pode limitar o prazo máximo.',
-      'Em Scopes, escolha Custom defined e marque:',
-      'Copie o token e cole no campo do Azure DevOps, junto com o nome da organização. Ele só aparece uma vez.',
-    ],
-    scopes: [
-      { name: 'Code', level: 'Read & Write', description: 'Ler PRs e criar a branch de release' },
-      { name: 'Work Items', level: 'Read & Write', description: 'Ler e vincular work items aos PRs' },
-      { name: 'Project and Team', level: 'Read', description: 'Listar os projetos da organização' },
-    ],
-    note: 'O token só faz o que a sua conta já pode fazer. Para criar releases, você ainda precisa das permissões Contribute e Create branch no repositório.',
-  },
-  jira: {
-    title: 'Token do Jira',
-    description:
-      'Use um API token com escopos da sua conta Atlassian. O site informado define qual Jira será usado; para trocar de site, conecte outro token.',
-    link: () => ({
-      label: 'id.atlassian.com/manage-profile/security/api-tokens',
-      href: 'https://id.atlassian.com/manage-profile/security/api-tokens',
-    }),
-    steps: [
-      'Abra a página de API tokens da sua conta Atlassian.',
-      'Clique em Create API token with scopes, dê um nome e defina a validade (até 1 ano).',
-      'Em Select app, escolha Jira.',
-      'Marque os escopos abaixo e crie o token:',
-      'Copie o token e cole no campo do Jira, junto com o e-mail da conta e o site (ex.: muralis.atlassian.net). Ele só aparece uma vez.',
-    ],
-    scopes: [
-      { name: 'read:jira-work', level: 'Read', description: 'Ler e buscar as issues vinculadas aos PRs', mono: true },
-      { name: 'write:jira-work', level: 'Write', description: 'Vincular e desvincular PRs nas issues', mono: true },
-      { name: 'read:jira-user', level: 'Read', description: 'Identificar a sua conta', mono: true },
-    ],
-    note: 'O token só faz o que a sua conta já pode fazer. Para vincular PRs, você precisa poder editar as issues do projeto.',
-  },
-  github: {
-    title: 'Token do GitHub',
-    description:
-      'Use um fine-grained token. Ele vale para um dono só; para trocar de organização, gere outro token nela e conecte no lugar do atual.',
-    link: () => ({
-      label: 'github.com/settings/personal-access-tokens/new',
-      href: 'https://github.com/settings/personal-access-tokens/new',
-    }),
-    steps: [
-      'Abra a página de criação de fine-grained tokens.',
-      'Em Resource owner, escolha a organização e defina a validade.',
-      'Em Repository access, escolha All repositories ou só os repositórios que você vai usar.',
-      'Em Permissions › Repository permissions, marque:',
-      'Gere o token e cole no campo do GitHub. Se a organização exigir aprovação, o token só funciona depois que um owner aprovar.',
-    ],
-    scopes: [
-      { name: 'Contents', level: 'Read & Write', description: 'Ler commits e criar a branch de release' },
-      { name: 'Pull requests', level: 'Read', description: 'Ler PRs, revisões e comentários' },
-      { name: 'Metadata', level: 'Read', description: 'Obrigatória, o GitHub marca sozinho' },
-    ],
-    note: 'O token só faz o que a sua conta já pode fazer. Para criar releases, você precisa de permissão Write nos repositórios.',
-  },
+// Chave de cada plataforma no catálogo.
+const CATALOG_KEY: Record<ProviderId, 'azureDevOps' | 'github' | 'jira'> = {
+  'azure-devops': 'azureDevOps',
+  github: 'github',
+  jira: 'jira',
 };
+
+// O que não muda com o idioma: endereços, escopos que dão escrita e nomes técnicos em fonte mono.
+const GUIDE_LINKS: Record<ProviderId, Guide['link']> = {
+  'azure-devops': (organization) => ({
+    label: `dev.azure.com/${organization || '{org}'}/_usersSettings/tokens`,
+    href: organization
+      ? `https://dev.azure.com/${encodeURIComponent(organization)}/_usersSettings/tokens`
+      : 'https://dev.azure.com',
+  }),
+  github: () => ({
+    label: 'github.com/settings/personal-access-tokens/new',
+    href: 'https://github.com/settings/personal-access-tokens/new',
+  }),
+  jira: () => ({
+    label: 'id.atlassian.com/manage-profile/security/api-tokens',
+    href: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+  }),
+};
+const WRITE_SCOPES: Record<ProviderId, boolean[]> = {
+  'azure-devops': [true, true, false],
+  github: [true, false, false],
+  jira: [false, true, false],
+};
+
+function guideFor(provider: ProviderId): Guide {
+  const base = `pat.guides.${CATALOG_KEY[provider]}`;
+  const scopes = t(`${base}.scopes`, { returnObjects: true }) as unknown as Guide['scopes'];
+  return {
+    title: t(`${base}.title`),
+    description: t(`${base}.description`),
+    link: GUIDE_LINKS[provider],
+    steps: t(`${base}.steps`, { returnObjects: true }) as unknown as Guide['steps'],
+    scopes: scopes.map((scope, index) => ({ ...scope, write: WRITE_SCOPES[provider][index], mono: provider === 'jira' })),
+    note: t(`${base}.note`),
+  };
+}
 
 function GuideStep({ number, text, children }: { number: number; text: string; children?: ReactNode }) {
   return (
@@ -130,11 +103,11 @@ function TokenGuide({ tab, onTab, organization }: { tab: ProviderId; onTab: (tab
     const timer = setTimeout(() => setShown(tab), 130);
     return () => clearTimeout(timer);
   }, [tab, shown]);
-  const guide = GUIDES[shown];
+  const guide = guideFor(shown);
   const link = guide.link(organization);
   return (
     <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-line bg-canvas px-9 py-7 short:py-5 lg:w-[680px] lg:border-l lg:border-t-0">
-      <div role="tablist" aria-label="Guia do token" className="flex gap-[3px] rounded-[10px] bg-[#EEF0F3] p-[3px]">
+      <div role="tablist" aria-label={t('pat.guideTabs')} className="flex gap-[3px] rounded-[10px] bg-[#EEF0F3] p-[3px]">
         {PLATFORMS.map((platform) => {
           const selected = platform.id === tab;
           return (
@@ -204,7 +177,7 @@ function TokenGuide({ tab, onTab, organization }: { tab: ProviderId; onTab: (tab
                     <span
                       className={cx(
                         'whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-semibold',
-                        scope.level === 'Read' ? 'bg-[#F1F5F9] text-ink-2' : 'bg-[#DBEAFE] text-[#1E40AF]',
+                        scope.write ? 'bg-[#DBEAFE] text-[#1E40AF]' : 'bg-[#F1F5F9] text-ink-2',
                       )}
                     >
                       {scope.level}
@@ -272,7 +245,7 @@ function PlatformRow({
         {connected && (
           <span className="flex items-center gap-[5px] rounded-full bg-[#DCFCE7] py-[3px] pl-[7px] pr-[9px]">
             <CircleCheck size={12} className="text-[#166534]" />
-            <span className="text-xs font-semibold text-[#166534]">Conectado</span>
+            <span className="text-xs font-semibold text-[#166534]">{t('pat.connected')}</span>
           </span>
         )}
         {hint && <span className="text-[13px] font-semibold text-mute">{hint}</span>}
@@ -297,7 +270,7 @@ function PlatformRow({
 // Vale só lado a lado; empilhado em telas estreitas, o card do token segue o conteúdo.
 export const ENTRY_CARD_HEIGHT = 'lg:h-[702px] lg:short:h-[648px]';
 
-const EMAIL = /^S+@S+.S+$/;
+const EMAIL = /^\S+@\S+\.\S+$/;
 
 type FieldName = 'organization' | 'owner' | 'site' | 'email';
 
@@ -310,28 +283,49 @@ interface FormSpec {
   address: (account: string) => string;
 }
 
+// Rótulos lidos na renderização, no idioma atual.
 const FORMS: Record<ProviderId, FormSpec> = {
   'azure-devops': {
-    fields: [{ name: 'organization', label: 'Organização', prefix: 'dev.azure.com/', autoComplete: 'organization' }],
-    tokenLabel: 'Personal Access Token',
-    hint: 'Para usar outra organização, gere um token nela e conecte no lugar deste.',
+    get fields() {
+      return [
+        { name: 'organization' as const, label: t('pat.forms.azureDevOps.organization'), prefix: 'dev.azure.com/', autoComplete: 'organization' },
+      ];
+    },
+    get tokenLabel() {
+      return t('pat.forms.azureDevOps.token');
+    },
+    get hint() {
+      return t('pat.forms.azureDevOps.hint');
+    },
     account: (values) => ({ organization: values.organization.trim() }),
     address: (account) => `dev.azure.com/${account}`,
   },
   github: {
-    fields: [{ name: 'owner', label: 'Organização ou usuário', prefix: 'github.com/', autoComplete: 'organization' }],
-    tokenLabel: 'Fine-grained token',
-    hint: 'Com o GitHub ativo, as tasks vêm do Jira, se ele estiver conectado.',
+    get fields() {
+      return [{ name: 'owner' as const, label: t('pat.forms.github.owner'), prefix: 'github.com/', autoComplete: 'organization' }];
+    },
+    get tokenLabel() {
+      return t('pat.forms.github.token');
+    },
+    get hint() {
+      return t('pat.forms.github.hint');
+    },
     account: (values) => ({ organization: values.owner.trim() }),
     address: (account) => `github.com/${account}`,
   },
   jira: {
-    fields: [
-      { name: 'site', label: 'Site', placeholder: 'empresa.atlassian.net', autoComplete: 'url' },
-      { name: 'email', label: 'E-mail da conta', placeholder: 'voce@empresa.com', autoComplete: 'email' },
-    ],
-    tokenLabel: 'API token',
-    hint: 'O Jira fornece as tasks dos PRs do GitHub. Os PRs do Azure DevOps usam os work items de lá.',
+    get fields() {
+      return [
+        { name: 'site' as const, label: t('pat.forms.jira.site'), placeholder: t('pat.forms.jira.sitePlaceholder'), autoComplete: 'url' },
+        { name: 'email' as const, label: t('pat.forms.jira.email'), placeholder: t('pat.forms.jira.emailPlaceholder'), autoComplete: 'email' },
+      ];
+    },
+    get tokenLabel() {
+      return t('pat.forms.jira.token');
+    },
+    get hint() {
+      return t('pat.forms.jira.hint');
+    },
     account: (values) => ({ site: values.site.trim(), email: values.email.trim() }),
     address: (account) => account,
   },
@@ -383,11 +377,19 @@ function ConnectForm({
       onConnected();
       toast.show({
         kind: 'success',
-        title: `${name} conectado em ${result.account}`,
-        description: `Token validado para ${result.user.name}.`,
+        title: t('pat.connectedToast', { name, account: result.account }),
+        description: t('pat.connectedToastBody', { user: result.user.name }),
       });
     },
   });
+
+  // Mudar a conta invalida o "aceito": o token foi validado para a conta anterior.
+  const account = JSON.stringify(spec.account(values));
+  const validatedAccount = useRef(account);
+  useEffect(() => {
+    if (validated && validatedAccount.current !== account) setValidated(false);
+    if (!validated) validatedAccount.current = account;
+  }, [account, validated]);
 
   const resetConnect = connect.reset;
   useEffect(() => {
@@ -455,10 +457,10 @@ function ConnectForm({
           <div
             className={cx(
               'stroke flex h-10 items-center gap-2 rounded-lg px-3',
-              validated
-                ? 'bg-[#F0FDF4] [--stroke:#16A34A]'
-                : connect.isError
-                  ? 'bg-white [--stroke:#DC2626]'
+              connect.isError
+                ? 'bg-white [--stroke:#DC2626]'
+                : validated
+                  ? 'bg-[#F0FDF4] [--stroke:#16A34A]'
                   : 'bg-white [--stroke:#CBD5E1] focus-within:[--stroke:#0F172A]',
             )}
           >
@@ -482,7 +484,7 @@ function ConnectForm({
             {!pending && (
               <button
                 type="button"
-                aria-label={reveal ? 'Ocultar token' : 'Mostrar token'}
+                aria-label={reveal ? t('pat.hideToken') : t('pat.showToken')}
                 aria-pressed={reveal}
                 onClick={() => setReveal(!reveal)}
                 className="shrink-0 text-faint hover:text-ink-2"
@@ -491,10 +493,10 @@ function ConnectForm({
               </button>
             )}
             {pending && (
-              <LoaderCircle size={16} role="status" aria-label="Validando o token" className="shrink-0 animate-spin text-mute" />
+              <LoaderCircle size={16} role="status" aria-label={t('pat.validating')} className="shrink-0 animate-spin text-mute" />
             )}
             {validated && !pending && (
-              <CircleCheck size={16} role="img" aria-label="Token validado" className="shrink-0 text-[#16A34A]" />
+              <CircleCheck size={16} role="img" aria-label={t('pat.validated')} className="shrink-0 text-[#16A34A]" />
             )}
           </div>
           {connect.isError && (
@@ -568,8 +570,8 @@ export function PatConnectPage({ defaultOrganization }: { defaultOrganization: s
 
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold tracking-[0.6px] text-mute">PLATAFORMAS</span>
-              <span className="text-[12.5px] text-mute">{connectedCount} de 3 conectadas</span>
+              <span className="text-xs font-semibold tracking-[0.6px] text-mute">{t('pat.platforms')}</span>
+              <span className="text-[12.5px] text-mute">{t('pat.connectedCount', { count: connectedCount })}</span>
             </div>
 
             {PLATFORMS.map((platform) => {
@@ -580,10 +582,10 @@ export function PatConnectPage({ defaultOrganization }: { defaultOrganization: s
                   key={platform.id}
                   logo={platform.logo(18)}
                   name={platform.name}
-                  sub={account ? FORMS[platform.id].address(account.account ?? '') : 'Nenhum token conectado'}
+                  sub={account ? FORMS[platform.id].address(account.account ?? '') : t('pat.noToken')}
                   connected={!!account && !expanded}
                   expanded={expanded}
-                  hint={expanded ? (connectedCount > 0 ? 'Fechar' : undefined) : account ? 'Trocar' : undefined}
+                  hint={expanded ? (connectedCount > 0 ? t('pat.close') : undefined) : account ? t('pat.change') : undefined}
                   onToggle={expanded ? (connectedCount > 0 ? () => show(null) : undefined) : () => show(platform.id)}
                 >
                   <ConnectForm
@@ -613,11 +615,11 @@ export function PatConnectPage({ defaultOrganization }: { defaultOrganization: s
                 hasSource ? 'hover-primary bg-ink text-white' : 'bg-[#E2E8F0] text-faint',
               )}
             >
-              Continuar
+              {t('pat.continue')}
               <ArrowRight size={16} />
             </button>
             <p className="text-center text-[12.5px] leading-[1.45] text-mute short:hidden">
-              Conecte o Azure DevOps ou o GitHub para continuar.
+              {t('pat.continueHint')}
             </p>
           </div>
         </div>

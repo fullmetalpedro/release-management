@@ -98,8 +98,8 @@ describe('classificação do board', () => {
     // Só o #1287 me tem como revisor obrigatório; no #311 sou opcional.
     expect(board.columns.dependsOnMe.map((c) => [c.id, c.reason, c.requiredReviewer])).toEqual([
       [1287, 'reviewer', true],
-      [642, 'waiting-author', false],
       [311, 'reviewer', false],
+      [642, 'waiting-author', false],
       [1279, 'waiting-author', false],
     ]);
   });
