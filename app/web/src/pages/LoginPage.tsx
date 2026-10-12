@@ -21,10 +21,10 @@ function ProviderButton({ logo, label, onClick }: { logo: ReactNode; label: stri
     <button
       type="button"
       onClick={onClick}
-      className="stroke flex h-12 w-full items-center justify-center gap-3 rounded-[10px] bg-white [--stroke:#D0D5DD] hover-surface"
+      className="stroke flex h-12 w-full items-center justify-center gap-3 rounded-[0.625rem] bg-white [--stroke:#D0D5DD] hover-surface"
     >
       {logo}
-      <span className="text-[15px] font-medium text-ink">{label}</span>
+      <span className="text-[0.9375rem] font-medium text-ink">{label}</span>
     </button>
   );
 }
@@ -38,7 +38,7 @@ const METHODS: { id: Method; label: () => string }[] = [
 
 function MethodSelector({ value, onChange }: { value: Method; onChange: (value: Method) => void }) {
   return (
-    <div role="tablist" aria-label={t('login.methods')} className="flex gap-0.5 rounded-lg bg-[#EEF0F3] p-[3px]">
+    <div role="tablist" aria-label={t('login.methods')} className="flex gap-0.5 rounded-lg bg-[#EEF0F3] p-[0.1875rem]">
       {METHODS.map((method) => {
         const selected = method.id === value;
         return (
@@ -49,7 +49,7 @@ function MethodSelector({ value, onChange }: { value: Method; onChange: (value: 
             aria-selected={selected}
             onClick={() => onChange(method.id)}
             className={cx(
-              'rounded-md px-3.5 py-[6px] text-[13px]',
+              'rounded-md px-3.5 py-[0.375rem] text-[0.8125rem]',
               selected ? 'bg-white font-semibold text-ink shadow-[0_1px_2px_#0F172A14]' : 'font-medium text-mute hover:text-ink',
             )}
           >
@@ -84,7 +84,7 @@ export function LoginPage() {
     <div className="flex min-h-full flex-col items-center justify-center gap-4 overflow-x-clip px-4 py-4 short:gap-3 short:py-2">
       {selector}
       {/* A chave troca junto com o modo: o card novo aparece sob a cobertura (que alcança a sombra), e o seletor fica parado. */}
-      <div key={method} className="fade-cover flex w-full justify-center [--cover-inset:-40px]">
+      <div key={method} className="fade-cover flex w-full justify-center [--cover-inset:-2.5rem]">
         {method === 'pat' ? (
           <PatConnectPage defaultOrganization={offers.defaultOrganization} />
         ) : (
@@ -110,17 +110,17 @@ function ProviderLoginPage({ available }: { available: boolean }) {
   return (
       <main
         className={cx(
-          'stroke flex w-full max-w-[440px] flex-col items-center justify-center gap-9 rounded-2xl bg-white px-10 py-10 shadow-[0_12px_32px_#0F172A0F]',
+          'stroke flex w-full max-w-[27.5rem] flex-col items-center justify-center gap-9 rounded-2xl bg-white px-10 py-10 shadow-[0_0.75rem_2rem_#0F172A0F]',
           ENTRY_CARD_HEIGHT,
         )}
       >
         <div className="flex w-full flex-col items-center gap-5">
-          <img src="/muralis-logo-full.png" alt="Muralis" className="h-[85px] w-[150px] object-contain" />
+          <img src="/muralis-logo-full.png" alt="Muralis" className="h-[5.3125rem] w-[9.375rem] object-contain" />
           <h1 className="text-2xl font-bold tracking-[-0.4px] text-ink">Release Management</h1>
         </div>
         <div className="flex w-full flex-col gap-3">
           {error && (
-            <p role="alert" className="text-center text-[13px] leading-[1.45] text-[#B91C1C]">
+            <p role="alert" className="text-center text-[0.8125rem] leading-[1.45] text-[#B91C1C]">
               {error}
             </p>
           )}

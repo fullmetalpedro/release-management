@@ -21,7 +21,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="hover-primary rounded-lg bg-ink px-3.5 py-2 text-[13px] font-semibold text-white"
+          className="hover-primary rounded-lg bg-ink px-3.5 py-2 text-[0.8125rem] font-semibold text-white"
         >
           {t('common.reload')}
         </button>

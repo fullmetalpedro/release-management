@@ -2,6 +2,7 @@ import { CircleCheck, CircleX, X } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { toast as sonner, Toaster } from 'sonner';
 import { t } from '../lib/i18n';
+import { rem } from '../lib/units';
 
 export interface ToastInput {
   kind: 'success' | 'error';
@@ -22,20 +23,20 @@ function ToastCard({ id, toast }: { id: string | number; toast: ToastInput }) {
   return (
     <div
       role={toast.kind === 'error' ? 'alert' : 'status'}
-      className="flex w-[400px] max-w-[calc(100vw-32px)] gap-3 rounded-xl bg-ink px-4 py-3.5 shadow-[0_12px_32px_#0F172A40]"
+      className="flex w-[25rem] max-w-[calc(100vw-2rem)] gap-3 rounded-xl bg-ink px-4 py-3.5 shadow-[0_0.75rem_2rem_#0F172A40]"
     >
       {toast.kind === 'success' ? (
-        <CircleCheck size={18} className="shrink-0 text-[#4ADE80]" />
+        <CircleCheck size={rem(18)} className="shrink-0 text-[#4ADE80]" />
       ) : (
-        <CircleX size={18} className="shrink-0 text-[#F87171]" />
+        <CircleX size={rem(18)} className="shrink-0 text-[#F87171]" />
       )}
       <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
-        <p className="text-[13.5px] font-semibold text-white">{toast.title}</p>
-        {toast.description && <p className="text-[12.5px] leading-[1.4] text-[#CBD5E1]">{toast.description}</p>}
+        <p className="text-[0.84375rem] font-semibold text-white">{toast.title}</p>
+        {toast.description && <p className="text-[0.78125rem] leading-[1.4] text-[#CBD5E1]">{toast.description}</p>}
         {toast.action && (
           <button
             type="button"
-            className="text-[12.5px] font-semibold text-[#A5B4FC] hover:text-white"
+            className="text-[0.78125rem] font-semibold text-[#A5B4FC] hover:text-white"
             onClick={() => {
               sonner.dismiss(id);
               toast.action!.onClick();
@@ -51,7 +52,7 @@ function ToastCard({ id, toast }: { id: string | number; toast: ToastInput }) {
         onClick={() => sonner.dismiss(id)}
         className="h-4 shrink-0 text-mute hover:text-white"
       >
-        <X size={16} />
+        <X size={rem(16)} />
       </button>
     </div>
   );
@@ -72,11 +73,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <Toaster
         position="bottom-right"
-        offset={{ bottom: 40, right: 32 }}
-        mobileOffset={16}
+        offset={{ bottom: rem(40), right: rem(32) }}
+        mobileOffset={rem(16)}
         visibleToasts={3}
-        gap={10}
-        style={{ '--width': '400px' } as CSSProperties}
+        gap={9}
+        style={{ '--width': '25rem' } as CSSProperties}
       />
     </>
   );

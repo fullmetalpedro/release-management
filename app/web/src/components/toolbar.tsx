@@ -4,19 +4,33 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Columns3,
-  FolderGit2,
   GitMerge,
-  LoaderCircle,
   RefreshCw,
   Search,
   User,
   Users,
   type LucideIcon,
 } from 'lucide-react';
+import { DropdownMenu } from 'radix-ui';
 import type { ProjectView } from '../lib/api';
 import { COLUMNS, type ColumnId } from './board';
-import { Avatar, Checkbox, cx, Dot, LightMenu, MenuOption, useDropdown } from './ui';
+import {
+  Avatar,
+  CheckMark,
+  cx,
+  Dot,
+  Menu,
+  MENU_ITEM_DARK,
+  MENU_ITEM_LIGHT,
+  MenuCheckboxItem,
+  MenuContent,
+  MenuItem,
+  MenuOption,
+  MenuRadioGroup,
+  MenuTrigger,
+} from './ui';
 import { t } from '../lib/i18n';
+import { rem } from '../lib/units';
 
 export function ProjectSwitcher({
   projects,
@@ -29,55 +43,36 @@ export function ProjectSwitcher({
   loading: boolean;
   onSelect: (id: string) => void;
 }) {
-  const { open, setOpen, ref } = useDropdown();
   return (
-    <div ref={ref} className="relative self-start">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={cx('hover-dark flex items-center gap-2 rounded-lg bg-[#2A2D33] py-[7px] pl-3 pr-2.5', open && 'stroke-focus')}
-      >
+    <Menu>
+      <MenuTrigger className="hover-dark flex items-center gap-2 self-start rounded-lg bg-[#2A2D33] py-[0.4375rem] pl-3 pr-2.5 data-[state=open]:stroke-focus">
         <span className="text-sm font-semibold text-white">
           {current?.name ?? (loading ? t('common.loading') : t('board.noProjects'))}
         </span>
-        {open ? <ChevronsDownUp size={14} className="text-[#A1A7B0]" /> : <ChevronsUpDown size={14} className="text-[#A1A7B0]" />}
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="pop-in absolute left-0 top-full z-30 mt-[11px] flex max-h-[min(420px,60vh)] w-[248px] flex-col gap-0.5 overflow-y-auto rounded-[10px] bg-[#2A2D33] p-1.5 shadow-[0_10px_28px_#0F172A40]"
-        >
-          <div className="px-2.5 pb-1.5 pt-2 text-[11px] font-semibold tracking-[0.6px] text-[#8B919A]">{t('board.projects')}</div>
+        <ChevronsUpDown size={rem(14)} className="text-[#A1A7B0] group-data-[state=open]:hidden" />
+        <ChevronsDownUp size={rem(14)} className="hidden text-[#A1A7B0] group-data-[state=open]:block" />
+      </MenuTrigger>
+      <MenuContent tone="dark" width={248} offset={10} title={t('board.projects')} className="max-h-[min(26.25rem,var(--radix-dropdown-menu-content-available-height))]">
+        <MenuRadioGroup value={current?.id} onValueChange={onSelect}>
           {projects.map((project) => {
             const selected = project.id === current?.id;
             return (
-              <button
+              <DropdownMenu.RadioItem
                 key={project.id}
-                type="button"
-                role="menuitemradio"
-                aria-checked={selected}
-                onClick={() => {
-                  onSelect(project.id);
-                  setOpen(false);
-                }}
-                className={cx(
-                  'flex h-10 items-center gap-2.5 rounded-md px-2.5 text-left',
-                  selected ? 'bg-[#3A3F48]' : 'hover-dark',
-                )}
+                value={project.id}
+                className={cx('flex h-10 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-left', MENU_ITEM_DARK, selected && 'bg-[#3A3F48]')}
               >
-                <span className={cx('min-w-0 flex-1 truncate text-[13px]', selected ? 'font-semibold text-white' : 'font-medium text-[#D1D5DB]')}>
+                <span className={cx('min-w-0 flex-1 truncate text-[0.8125rem]', selected ? 'font-semibold text-white' : 'font-medium text-[#D1D5DB]')}>
                   {project.name}
                 </span>
                 <span className="text-xs text-[#8B919A]">{t('common.prCount', { count: project.openPullRequests })}</span>
-                {selected && <Check size={14} className="text-white" />}
-              </button>
+                {selected && <Check size={rem(14)} className="text-white" />}
+              </DropdownMenu.RadioItem>
             );
           })}
-        </div>
-      )}
-    </div>
+        </MenuRadioGroup>
+      </MenuContent>
+    </Menu>
   );
 }
 
@@ -106,36 +101,27 @@ export function FilterSelect({
   // Opções em texto comum, em vez da fonte monoespaçada usada para repositórios e branches.
   plain?: boolean;
 }) {
-  const { open, setOpen, ref } = useDropdown();
   const current = options.find((o) => o.id === value);
   const hasPeople = options.some((o) => o.person);
-  const pick = (next: string | null) => {
-    onChange(next);
-    setOpen(false);
-  };
+  // O grupo de opções trabalha com texto; a opção "todos" é o texto vazio.
+  const ALL = '';
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={cx('stroke hover-surface flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-[7px]', open && 'stroke-focus')}
-      >
-        <Icon size={14} className="text-mute" />
-        <span className="text-[13px] text-mute">{label}:</span>
-        <span className="max-w-[140px] truncate text-[13px] font-medium text-ink">{current?.name ?? allLabel}</span>
-        <ChevronDown size={14} className={cx('text-faint transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <LightMenu width={220}>
+    <Menu>
+      <MenuTrigger className="stroke hover-surface flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-[0.4375rem] data-[state=open]:stroke-focus">
+        <Icon size={rem(14)} className="text-mute" />
+        <span className="text-[0.8125rem] text-mute">{label}:</span>
+        <span className="max-w-[8.75rem] truncate text-[0.8125rem] font-medium text-ink">{current?.name ?? allLabel}</span>
+        <ChevronDown size={rem(14)} className="text-faint transition-transform group-data-[state=open]:rotate-180" />
+      </MenuTrigger>
+      <MenuContent width={220}>
+        <MenuRadioGroup value={value ?? ALL} onValueChange={(next) => onChange(next === ALL ? null : next)}>
           <MenuOption
+            value={ALL}
             selected={value === null}
-            onSelect={() => pick(null)}
             leading={
               hasPeople ? (
-                <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#F1F5F9]">
-                  <Users size={12} className="text-mute" />
+                <span className="flex h-[1.375rem] w-[1.375rem] shrink-0 items-center justify-center rounded-full bg-[#F1F5F9]">
+                  <Users size={rem(12)} className="text-mute" />
                 </span>
               ) : undefined
             }
@@ -145,22 +131,21 @@ export function FilterSelect({
           {options.map((option) => (
             <MenuOption
               key={option.id}
+              value={option.id}
               mono={!plain}
               selected={option.id === value}
-              onSelect={() => pick(option.id)}
               leading={option.person && <Avatar {...option.person} />}
             >
               {option.name}
             </MenuOption>
           ))}
-        </LightMenu>
-      )}
-    </div>
+        </MenuRadioGroup>
+      </MenuContent>
+    </Menu>
   );
 }
 
 export const AuthorIcon = User;
-export const RepositoryIcon = FolderGit2;
 export const TargetIcon = GitMerge;
 
 export function ColumnsDropdown({
@@ -172,82 +157,76 @@ export function ColumnsDropdown({
   counts: Partial<Record<ColumnId, number>>;
   onChange: (hidden: ColumnId[]) => void;
 }) {
-  const { open, setOpen, ref } = useDropdown();
   const visible = COLUMNS.length - hidden.length;
   const toggle = (id: ColumnId) => {
     if (hidden.includes(id)) onChange(hidden.filter((h) => h !== id));
     // Sempre sobra pelo menos uma coluna.
     else if (visible > 1) onChange([...hidden, id]);
   };
+  // Marcar e desmarcar não fecha o menu.
+  const stayOpen = (event: Event) => event.preventDefault();
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={cx('stroke hover-surface flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-[7px]', open && 'stroke-focus')}
-      >
-        <Columns3 size={14} className="text-ink-2" />
-        <span className="text-[13px] font-medium text-ink">{t('board.columns')}</span>
-        <span className="rounded-lg bg-[#F1F5F9] px-1.5 py-px text-[11.5px] font-semibold text-ink-2">
+    <Menu>
+      <MenuTrigger className="stroke hover-surface flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-[0.4375rem] data-[state=open]:stroke-focus">
+        <Columns3 size={rem(14)} className="text-ink-2" />
+        <span className="text-[0.8125rem] font-medium text-ink">{t('board.columns')}</span>
+        <span className="rounded-lg bg-[#F1F5F9] px-1.5 py-px text-[0.71875rem] font-semibold text-ink-2">
           {visible}/{COLUMNS.length}
         </span>
-        <ChevronDown size={14} className={cx('text-faint transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <LightMenu title={t('board.visibleColumns')}>
-          {COLUMNS.map((column) => {
-            const shown = !hidden.includes(column.id);
-            return (
-              <div
-                key={column.id}
-                role="menuitemcheckbox"
-                aria-checked={shown}
-                tabIndex={-1}
-                onClick={() => toggle(column.id)}
-                className={cx('hover-row flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2', !shown && 'bg-soft')}
-              >
-                <Checkbox state={shown ? 'on' : 'off'} label={column.name} onChange={() => toggle(column.id)} />
-                <Dot color={column.color} />
-                <span className={cx('min-w-0 flex-1 text-[13px] font-medium', shown ? 'text-ink' : 'text-faint')}>
-                  {column.name}
-                </span>
-                <span className="text-xs text-faint">{counts[column.id] ?? ''}</span>
-              </div>
-            );
-          })}
-          <div className="h-px shrink-0 bg-line-soft" />
-          <div className="flex items-center justify-between px-2.5 py-2">
-            <button
-              type="button"
-              disabled={hidden.length === 0}
-              onClick={() => onChange([])}
-              className="text-[12.5px] font-semibold text-[#0F766E] disabled:text-faint"
+        <ChevronDown size={rem(14)} className="text-faint transition-transform group-data-[state=open]:rotate-180" />
+      </MenuTrigger>
+      <MenuContent title={t('board.visibleColumns')}>
+        {COLUMNS.map((column) => {
+          const shown = !hidden.includes(column.id);
+          return (
+            <MenuCheckboxItem
+              key={column.id}
+              checked={shown}
+              // A última coluna visível não pode ser escondida.
+              disabled={shown && visible === 1}
+              onCheckedChange={() => toggle(column.id)}
+              onSelect={stayOpen}
+              className={cx('flex items-center gap-2.5 rounded-md px-2.5 py-2', MENU_ITEM_LIGHT, !shown && 'bg-soft')}
             >
-              {t('board.showAll')}
-            </button>
-            <span className="text-xs text-faint">
-              {hidden.length === 0 ? t('board.noneHidden') : t('board.hidden', { count: hidden.length })}
-            </span>
-          </div>
-        </LightMenu>
-      )}
-    </div>
+              <CheckMark checked={shown} />
+              <Dot color={column.color} />
+              <span className={cx('min-w-0 flex-1 text-[0.8125rem] font-medium', shown ? 'text-ink' : 'text-faint')}>{column.name}</span>
+              <span className="text-xs text-faint">{counts[column.id] ?? ''}</span>
+            </MenuCheckboxItem>
+          );
+        })}
+        <div className="h-px shrink-0 bg-line-soft" />
+        <div className="flex items-center justify-between px-2.5 py-2">
+          <MenuItem
+            disabled={hidden.length === 0}
+            onSelect={(event) => {
+              stayOpen(event);
+              onChange([]);
+            }}
+            className="cursor-default rounded text-[0.78125rem] font-semibold text-[#0F766E] outline-none data-[disabled]:text-faint data-[highlighted]:underline"
+          >
+            {t('board.showAll')}
+          </MenuItem>
+          <span className="text-xs text-faint">
+            {hidden.length === 0 ? t('board.noneHidden') : t('board.hidden', { count: hidden.length })}
+          </span>
+        </div>
+      </MenuContent>
+    </Menu>
   );
 }
 
 export function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <label className="stroke flex w-[220px] items-center gap-2 rounded-lg bg-white px-2.5 py-[7px] focus-within:stroke-focus">
-      <Search size={14} className="shrink-0 text-faint" />
+    <label className="stroke flex w-[13.75rem] items-center gap-2 rounded-lg bg-white px-2.5 py-[0.4375rem] focus-within:stroke-focus">
+      <Search size={rem(14)} className="shrink-0 text-faint" />
       <input
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={t('board.search')}
         aria-label={t('board.search')}
-        className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-faint"
+        className="min-w-0 flex-1 bg-transparent text-[0.8125rem] text-ink outline-none placeholder:text-faint"
       />
     </label>
   );
@@ -273,17 +252,18 @@ export function SyncControls({
         onClick={onRefresh}
         disabled={syncing}
         className={cx(
-          'grid shrink-0 rounded-lg px-3.5 py-2 text-[13px] font-semibold text-white',
-          syncing ? 'bg-ink-2' : 'hover-primary bg-ink',
+          'grid shrink-0 rounded-lg px-3.5 py-2 text-[0.8125rem] font-semibold text-white',
+          // Sincronizando, o botão fica na cor do hover.
+          syncing ? 'bg-[#1E293B]' : 'hover-primary bg-ink',
         )}
       >
         {/* Os dois rótulos ocupam o mesmo lugar: o botão não muda de largura a cada sincronização. */}
         <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-1.5', syncing && 'invisible')}>
-          <RefreshCw size={14} />
+          <RefreshCw size={rem(14)} />
           {t('common.refresh')}
         </span>
         <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-1.5', !syncing && 'invisible')}>
-          <LoaderCircle size={14} className={cx(syncing && 'animate-spin')} />
+          <RefreshCw size={rem(14)} className={cx(syncing && 'animate-spin')} />
           {t('common.syncing')}
         </span>
       </button>

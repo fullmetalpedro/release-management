@@ -11,13 +11,13 @@ import {
   type ReviewerScope,
 } from '../components/board';
 import { MergedColumn, ReleaseColumn, type CreateState } from '../components/lanes';
+import { isHexColor, RepositoryFilter } from '../components/repoColors';
 import { useToast } from '../components/toast';
 import {
   AuthorIcon,
   ColumnsDropdown,
   FilterSelect,
   ProjectSwitcher,
-  RepositoryIcon,
   SearchBox,
   SyncControls,
   TargetIcon,
@@ -39,6 +39,11 @@ const isColumnList = (value: unknown): value is ColumnId[] =>
   Array.isArray(value) && value.every((id) => COLUMNS.some((column) => column.id === id));
 const isLaneChoice = (value: unknown): value is Record<string, { merged?: string; release?: string }> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) && Object.values(value).every((v) => typeof v === 'object' && v !== null);
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+// Cores dos repositórios, por projeto: { projeto: { repositório: '#RRGGBB' } }.
+const isColorChoice = (value: unknown): value is Record<string, Record<string, string>> =>
+  isRecord(value) && Object.values(value).every((colors) => isRecord(colors) && Object.values(colors).every(isHexColor));
+const isColorList = (value: unknown): value is string[] => Array.isArray(value) && value.every(isHexColor);
 const isReviewerScope = (value: unknown): value is ReviewerScope => value === 'all' || value === 'required';
 
 export function BoardPage() {
@@ -49,20 +54,29 @@ export function BoardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [chosenRepository, setRepositoryFilter] = useState<string | null>(null);
+  // Vários repositórios podem ser filtrados juntos; lista vazia é "todos".
+  const [chosenRepositories, setRepositoryFilter] = useState<string[]>([]);
   const [chosenTarget, setTargetFilter] = useState<string | null>(null);
   const [chosenAuthor, setAuthorFilter] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [hidden, setHidden] = useStoredState<ColumnId[]>('rm.hiddenColumns', [], isColumnList);
   const [laneRepos, setLaneRepos] = useStoredState<Record<string, { merged?: string; release?: string }>>('rm.laneRepos', {}, isLaneChoice);
   const [reviewerScope, setReviewerScope] = useStoredState<ReviewerScope>('rm.reviewerScope', 'all', isReviewerScope);
+  const [colorChoices, setColorChoices] = useStoredState<Record<string, Record<string, string>>>('rm.repoColors', {}, isColorChoice);
+  const [customColors, setCustomColors] = useStoredState<string[]>('rm.customColors', [], isColorList);
+  const repositoryColors = (projectId && colorChoices[projectId]) || {};
+  const setRepositoryColor = (repositoryId: string, hex: string | null) => {
+    if (!projectId) return;
+    const { [repositoryId]: _previous, ...others } = repositoryColors;
+    setColorChoices({ ...colorChoices, [projectId]: hex ? { ...others, [repositoryId]: hex } : others });
+  };
   const [createState, setCreateState] = useState<CreateState>({ status: 'idle' });
   const [justCreated, setJustCreated] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Filtros de repositório e destino só fazem sentido dentro do projeto em que foram escolhidos.
   useEffect(() => {
-    setRepositoryFilter(null);
+    setRepositoryFilter([]);
     setTargetFilter(null);
     // "Você" vale em qualquer projeto; um colega escolhido pelo nome pode nem existir no outro.
     setAuthorFilter((current) => (current === AUTHOR_ME ? current : null));
@@ -79,6 +93,10 @@ export function BoardPage() {
   });
 
   const repositories = board.data?.repositories ?? [];
+  const repositoryFilter = useMemo(
+    () => chosenRepositories.filter((id) => repositories.some((repository) => repository.id === id)),
+    [chosenRepositories, repositories],
+  );
   const chosen = (projectId && laneRepos[projectId]) || {};
   const pick = (id: string | undefined) => (repositories.some((r) => r.id === id) ? id : repositories[0]?.id);
   const mergedRepo = pick(chosen.merged);
@@ -101,12 +119,17 @@ export function BoardPage() {
   const mergedLane = useQuery(laneOptions(mergedRepo));
   const releaseLane = useQuery(laneOptions(releaseRepo));
 
+  // Cliques em sequência chegam antes de o botão ser redesenhado como desabilitado; só o primeiro vira pedido.
+  const creating = useRef(false);
   // O projeto vai junto com o pedido: se o usuário trocar de projeto no meio, a resposta (e o "Tentar de novo")
   // continua valendo para o projeto em que a release foi pedida.
   const create = useMutation({
     mutationFn: (input: { projectId: string; repositoryId: string; name: string; pullRequestIds: number[] }) =>
       api.createRelease(input.projectId, input.repositoryId, input.name, input.pullRequestIds),
     onMutate: () => setCreateState({ status: 'creating' }),
+    onSettled: () => {
+      creating.current = false;
+    },
     onSuccess: async (created, input) => {
       if (input.projectId === projectId) setLaneRepo('release', input.repositoryId);
       // A tela cheia da release guarda a própria cópia; sem isto ela mostraria a release anterior como a última.
@@ -161,7 +184,6 @@ export function BoardPage() {
   // Um filtro só vale enquanto a opção existe: se o último PR daquele autor foi mergeado, o filtro deixa de agir
   // (e o botão já mostra "todos"), em vez de esvaziar o board sem explicação.
   const exists = (options: { id: string }[], value: string | null) => (options.some((option) => option.id === value) ? value : null);
-  const repositoryFilter = exists(repositories, chosenRepository);
   const targetFilter = exists(targets, chosenTarget);
   const authorFilter = exists(authors, chosenAuthor);
 
@@ -169,7 +191,7 @@ export function BoardPage() {
     const term = search.trim().toLowerCase();
     const matches = (pr: PullRequestCard) =>
       (!authorFilter || (authorFilter === AUTHOR_ME ? pr.author.isMe : !pr.author.isMe && pr.author.name === authorFilter)) &&
-      (!repositoryFilter || pr.repository.id === repositoryFilter) &&
+      (repositoryFilter.length === 0 || repositoryFilter.includes(pr.repository.id)) &&
       (!targetFilter || pr.targetBranch === targetFilter) &&
       (!term ||
         pr.title.toLowerCase().includes(term) ||
@@ -195,7 +217,7 @@ export function BoardPage() {
     reviewerScope === 'required' &&
     (board.data?.columns.dependsOnMe ?? []).some((pr) => pr.reason === 'reviewer' && !pr.requiredReviewer);
   const isFiltered =
-    !!repositoryFilter || !!targetFilter || !!authorFilter || search.trim() !== '';
+    repositoryFilter.length > 0 || !!targetFilter || !!authorFilter || search.trim() !== '';
 
   // Sem projeto a consulta do board nem começa: não há o que esperar.
   const loading = !board.data && !board.isError && (projectsLoading || (!!projectId && board.isPending));
@@ -241,9 +263,11 @@ export function BoardPage() {
           failed={mergedFailed}
           state={createState}
           onSelectionChange={() => createState.status === 'failed' && setCreateState({ status: 'idle' })}
-          onCreate={(name, pullRequestIds) =>
-            projectId && mergedRepo && create.mutate({ projectId, repositoryId: mergedRepo, name, pullRequestIds })
-          }
+          onCreate={(name, pullRequestIds) => {
+            if (!projectId || !mergedRepo || creating.current) return;
+            creating.current = true;
+            create.mutate({ projectId, repositoryId: mergedRepo, name, pullRequestIds });
+          }}
         />
       );
     }
@@ -265,6 +289,7 @@ export function BoardPage() {
       <OpenColumn
         id={column.id}
         cards={filtered[column.id]}
+        repositoryColors={repositoryColors}
         loading={loading}
         emptyState={!!board.data && !isFiltered && !(column.id === 'dependsOnMe' && optionalHidden)}
         filtered={isFiltered || (column.id === 'dependsOnMe' && optionalHidden)}
@@ -284,14 +309,14 @@ export function BoardPage() {
   };
 
   return (
-    <div data-page="board" className="flex h-full min-h-[560px] flex-col">
+    <div data-page="board" className="flex h-full min-h-[35rem] flex-col">
       <TopBar />
 
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 px-8 pb-5 pt-7">
         <div className="flex flex-col gap-2.5">
           <ProjectSwitcher projects={projects} current={project} loading={projectsLoading} onSelect={selectProject} />
           <h1 className="text-2xl font-bold tracking-[-0.3px] text-ink">{t('board.title')}</h1>
-          <div className="flex h-4 items-center gap-2 text-[13px]">
+          <div className="flex h-4 items-center gap-2 text-[0.8125rem]">
             {loading || !board.data ? null : (
               <>
                 <span className="font-medium text-ink-2">
@@ -320,13 +345,17 @@ export function BoardPage() {
             onChange={setAuthorFilter}
             plain
           />
-          <FilterSelect
-            icon={RepositoryIcon}
+          <RepositoryFilter
             label={t('board.repository')}
             allLabel={t('board.allRepositories')}
-            options={repositories}
+            countLabel={(count) => t('board.repositoriesSelected', { count })}
+            repositories={repositories}
             value={repositoryFilter}
             onChange={setRepositoryFilter}
+            colors={repositoryColors}
+            onColorChange={setRepositoryColor}
+            customColors={customColors}
+            onCustomColorsChange={setCustomColors}
           />
           <FilterSelect
             icon={TargetIcon}

@@ -20,6 +20,7 @@ import type { Me, ProviderId } from '../lib/api';
 import { connectPlatform, type PlatformAccount } from '../lib/pat';
 import { useMe } from '../lib/session';
 import { t } from '../lib/i18n';
+import { rem } from '../lib/units';
 
 interface Guide {
   title: string;
@@ -83,11 +84,11 @@ function guideFor(provider: ProviderId): Guide {
 function GuideStep({ number, text, children }: { number: number; text: string; children?: ReactNode }) {
   return (
     <li className="flex gap-3">
-      <span className="stroke flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-white text-[11.5px] font-bold text-ink-2 [--stroke:#CBD5E1]">
+      <span className="stroke flex h-[1.375rem] w-[1.375rem] shrink-0 items-center justify-center rounded-full bg-white text-[0.71875rem] font-bold text-ink-2 [--stroke:#CBD5E1]">
         {number}
       </span>
       <div className="flex min-w-0 flex-1 flex-col items-start gap-2.5 pt-0.5">
-        <p className="text-[13.5px] leading-[1.5] text-ink-2">{text}</p>
+        <p className="text-[0.84375rem] leading-[1.5] text-ink-2">{text}</p>
         {children}
       </div>
     </li>
@@ -106,8 +107,8 @@ function TokenGuide({ tab, onTab, organization }: { tab: ProviderId; onTab: (tab
   const guide = guideFor(shown);
   const link = guide.link(organization);
   return (
-    <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-line bg-canvas px-9 py-7 short:py-5 lg:w-[680px] lg:border-l lg:border-t-0">
-      <div role="tablist" aria-label={t('pat.guideTabs')} className="flex gap-[3px] rounded-[10px] bg-[#EEF0F3] p-[3px]">
+    <aside className="flex w-full shrink-0 flex-col gap-5 border-t border-line bg-canvas px-9 py-7 short:py-5 lg:w-[42.5rem] lg:border-l lg:border-t-0">
+      <div role="tablist" aria-label={t('pat.guideTabs')} className="flex gap-[0.1875rem] rounded-[0.625rem] bg-[#EEF0F3] p-[0.1875rem]">
         {PLATFORMS.map((platform) => {
           const selected = platform.id === tab;
           return (
@@ -118,8 +119,8 @@ function TokenGuide({ tab, onTab, organization }: { tab: ProviderId; onTab: (tab
               aria-selected={selected}
               onClick={() => onTab(platform.id)}
               className={cx(
-                'flex h-8 flex-1 basis-0 items-center justify-center gap-1.5 rounded-lg text-[12.5px]',
-                selected ? 'bg-white font-semibold text-ink shadow-[0_1px_3px_#0F172A14]' : 'font-medium text-mute hover:text-ink',
+                'flex h-8 flex-1 basis-0 items-center justify-center gap-1.5 rounded-lg text-[0.78125rem]',
+                selected ? 'bg-white font-semibold text-ink shadow-[0_1px_0.1875rem_#0F172A14]' : 'font-medium text-mute hover:text-ink',
               )}
             >
               <span className={cx('flex', !selected && 'opacity-60')}>{platform.logo(13)}</span>
@@ -140,12 +141,12 @@ function TokenGuide({ tab, onTab, organization }: { tab: ProviderId; onTab: (tab
       />
       <div className="flex flex-col gap-1.5">
         <h2 className="text-lg font-bold tracking-[-0.2px] text-ink">{guide.title}</h2>
-        <p className="text-[13.5px] leading-[1.5] text-mute">{guide.description}</p>
+        <p className="text-[0.84375rem] leading-[1.5] text-mute">{guide.description}</p>
       </div>
 
       {/* Passos 1 a 3 numa coluna, 4 e 5 na outra: o guia usa a largura em vez de empilhar tudo. */}
-      <div className="grid grid-cols-1 gap-x-7 gap-y-[18px] md:grid-cols-2">
-      <ol className="flex flex-col gap-[18px]">
+      <div className="grid grid-cols-1 gap-x-7 gap-y-[1.125rem] md:grid-cols-2">
+      <ol className="flex flex-col gap-[1.125rem]">
         <GuideStep number={1} text={guide.steps[0]}>
           <a
             href={link.href}
@@ -153,30 +154,30 @@ function TokenGuide({ tab, onTab, organization }: { tab: ProviderId; onTab: (tab
             rel="noreferrer"
             className="stroke flex max-w-full items-center gap-1.5 rounded-md bg-white px-2.5 py-1.5 hover-surface"
           >
-            <span className="min-w-0 break-all font-mono text-[11.5px] font-medium leading-[1.4] text-[#1E40AF]">{link.label}</span>
-            <ExternalLink size={12} className="shrink-0 text-[#1E40AF]" />
+            <span className="min-w-0 break-all font-mono text-[0.71875rem] font-medium leading-[1.4] text-[#1E40AF]">{link.label}</span>
+            <ExternalLink size={rem(12)} className="shrink-0 text-[#1E40AF]" />
           </a>
         </GuideStep>
         <GuideStep number={2} text={guide.steps[1]} />
         <GuideStep number={3} text={guide.steps[2]} />
       </ol>
-      <ol start={4} className="flex flex-col gap-[18px]">
+      <ol start={4} className="flex flex-col gap-[1.125rem]">
         <GuideStep number={4} text={guide.steps[3]}>
-          <ul className="stroke flex w-full flex-col rounded-[10px] bg-white">
+          <ul className="stroke flex w-full flex-col rounded-[0.625rem] bg-white">
             {guide.scopes.map((scope, index) => (
               <li
                 key={scope.name}
-                className={cx('flex gap-2.5 px-3 py-[9px]', index < guide.scopes.length - 1 && 'border-b border-line-soft')}
+                className={cx('flex gap-2.5 px-3 py-[0.5625rem]', index < guide.scopes.length - 1 && 'border-b border-line-soft')}
               >
-                <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-ink">
-                  <Check size={12} className="text-white" />
+                <span className="flex h-[1.125rem] w-[1.125rem] shrink-0 items-center justify-center rounded-[0.3125rem] bg-ink">
+                  <Check size={rem(12)} className="text-white" />
                 </span>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className={cx('text-[13px] font-semibold text-ink', scope.mono && 'font-mono text-[12.5px]')}>{scope.name}</span>
+                    <span className={cx('text-[0.8125rem] font-semibold text-ink', scope.mono && 'font-mono text-[0.78125rem]')}>{scope.name}</span>
                     <span
                       className={cx(
-                        'whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-semibold',
+                        'whitespace-nowrap rounded-full px-2 py-0.5 text-[0.71875rem] font-semibold',
                         scope.write ? 'bg-[#DBEAFE] text-[#1E40AF]' : 'bg-[#F1F5F9] text-ink-2',
                       )}
                     >
@@ -193,9 +194,9 @@ function TokenGuide({ tab, onTab, organization }: { tab: ProviderId; onTab: (tab
       </ol>
       </div>
 
-      <div className="stroke flex gap-2.5 rounded-[10px] bg-[#FFFBEB] px-3.5 py-3 [--stroke:#FDE68A]">
-        <Info size={16} className="shrink-0 text-[#B45309]" />
-        <p className="text-[12.5px] leading-[1.45] text-[#92400E]">{guide.note}</p>
+      <div className="stroke flex gap-2.5 rounded-[0.625rem] bg-[#FFFBEB] px-3.5 py-3 [--stroke:#FDE68A]">
+        <Info size={rem(16)} className="shrink-0 text-[#B45309]" />
+        <p className="text-[0.78125rem] leading-[1.45] text-[#92400E]">{guide.note}</p>
       </div>
       </div>
     </aside>
@@ -239,16 +240,16 @@ function PlatformRow({
       >
         <span className="stroke flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-canvas">{logo}</span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-[15px] font-semibold text-ink">{name}</span>
-          <span className="truncate text-[12.5px] text-mute">{sub}</span>
+          <span className="text-[0.9375rem] font-semibold text-ink">{name}</span>
+          <span className="truncate text-[0.78125rem] text-mute">{sub}</span>
         </div>
         {connected && (
-          <span className="flex items-center gap-[5px] rounded-full bg-[#DCFCE7] py-[3px] pl-[7px] pr-[9px]">
-            <CircleCheck size={12} className="text-[#166534]" />
+          <span className="flex items-center gap-[0.3125rem] rounded-full bg-[#DCFCE7] py-[0.1875rem] pl-[0.4375rem] pr-[0.5625rem]">
+            <CircleCheck size={rem(12)} className="text-[#166534]" />
             <span className="text-xs font-semibold text-[#166534]">{t('pat.connected')}</span>
           </span>
         )}
-        {hint && <span className="text-[13px] font-semibold text-mute">{hint}</span>}
+        {hint && <span className="text-[0.8125rem] font-semibold text-mute">{hint}</span>}
       </Header>
       {/* O formulário abre e fecha deslizando: a linha da grade vai de 0 à altura do conteúdo. */}
       <div
@@ -268,7 +269,7 @@ function PlatformRow({
 
 // Altura comum aos dois cards da tela de entrada (login e token), para a troca de modo não mudar a altura.
 // Vale só lado a lado; empilhado em telas estreitas, o card do token segue o conteúdo.
-export const ENTRY_CARD_HEIGHT = 'lg:h-[702px] lg:short:h-[648px]';
+export const ENTRY_CARD_HEIGHT = 'lg:h-[43.875rem] lg:short:h-[40.5rem]';
 
 const EMAIL = /^\S+@\S+\.\S+$/;
 
@@ -431,11 +432,11 @@ function ConnectForm({
         <div className="flex gap-3">
           {spec.fields.map((field) => (
             <div key={field.name} className="flex min-w-0 flex-1 basis-0 flex-col gap-1.5">
-              <label htmlFor={`pat-${field.name}`} className="text-[12.5px] font-medium text-ink-2">
+              <label htmlFor={`pat-${field.name}`} className="text-[0.78125rem] font-medium text-ink-2">
                 {field.label}
               </label>
               <div className="stroke flex h-10 items-center rounded-lg bg-white px-3 [--stroke:#CBD5E1] focus-within:[--stroke:#0F172A]">
-                {field.prefix && <span className="font-mono text-[13px] text-faint">{field.prefix}</span>}
+                {field.prefix && <span className="font-mono text-[0.8125rem] text-faint">{field.prefix}</span>}
                 <input
                   id={`pat-${field.name}`}
                   value={values[field.name]}
@@ -444,14 +445,14 @@ function ConnectForm({
                   placeholder={field.placeholder}
                   autoComplete={field.autoComplete}
                   spellCheck={false}
-                  className="min-w-0 flex-1 bg-transparent font-mono text-[13px] font-medium text-ink outline-none placeholder:font-normal placeholder:text-faint"
+                  className="min-w-0 flex-1 bg-transparent font-mono text-[0.8125rem] font-medium text-ink outline-none placeholder:font-normal placeholder:text-faint"
                 />
               </div>
             </div>
           ))}
         </div>
         <div className="flex flex-col gap-1.5">
-          <label htmlFor={`pat-token-${provider}`} className="text-[12.5px] font-medium text-ink-2">
+          <label htmlFor={`pat-token-${provider}`} className="text-[0.78125rem] font-medium text-ink-2">
             {spec.tokenLabel}
           </label>
           <div
@@ -464,7 +465,7 @@ function ConnectForm({
                   : 'bg-white [--stroke:#CBD5E1] focus-within:[--stroke:#0F172A]',
             )}
           >
-            <KeyRound size={15} className={cx('shrink-0', validated ? 'text-[#16A34A]' : 'text-mute')} />
+            <KeyRound size={rem(15)} className={cx('shrink-0', validated ? 'text-[#16A34A]' : 'text-mute')} />
             <input
               id={`pat-token-${provider}`}
               type={reveal ? 'text' : 'password'}
@@ -479,7 +480,7 @@ function ConnectForm({
               spellCheck={false}
               aria-invalid={connect.isError}
               aria-describedby={connect.isError ? errorId : undefined}
-              className="min-w-0 flex-1 bg-transparent font-mono text-[13px] leading-[1.2] text-ink outline-none"
+              className="min-w-0 flex-1 bg-transparent font-mono text-[0.8125rem] leading-[1.2] text-ink outline-none"
             />
             {!pending && (
               <button
@@ -489,26 +490,26 @@ function ConnectForm({
                 onClick={() => setReveal(!reveal)}
                 className="shrink-0 text-faint hover:text-ink-2"
               >
-                {reveal ? <EyeOff size={16} /> : <Eye size={16} />}
+                {reveal ? <EyeOff size={rem(16)} /> : <Eye size={rem(16)} />}
               </button>
             )}
             {pending && (
-              <LoaderCircle size={16} role="status" aria-label={t('pat.validating')} className="shrink-0 animate-spin text-mute" />
+              <LoaderCircle size={rem(16)} role="status" aria-label={t('pat.validating')} className="shrink-0 animate-spin text-mute" />
             )}
             {validated && !pending && (
-              <CircleCheck size={16} role="img" aria-label={t('pat.validated')} className="shrink-0 text-[#16A34A]" />
+              <CircleCheck size={rem(16)} role="img" aria-label={t('pat.validated')} className="shrink-0 text-[#16A34A]" />
             )}
           </div>
           {connect.isError && (
-            <p id={errorId} role="alert" className="text-[12.5px] leading-[1.4] text-[#B91C1C]">
+            <p id={errorId} role="alert" className="text-[0.78125rem] leading-[1.4] text-[#B91C1C]">
               {connect.error.message}
             </p>
           )}
         </div>
       </div>
       <div className="flex gap-2">
-        <Repeat2 size={14} className="mt-0.5 shrink-0 text-mute" />
-        <p className="text-[12.5px] leading-[1.4] text-mute">{spec.hint}</p>
+        <Repeat2 size={rem(14)} className="mt-0.5 shrink-0 text-mute" />
+        <p className="text-[0.78125rem] leading-[1.4] text-mute">{spec.hint}</p>
       </div>
     </form>
   );
@@ -557,21 +558,21 @@ export function PatConnectPage({ defaultOrganization }: { defaultOrganization: s
   return (
       <main
         className={cx(
-          'stroke flex w-full max-w-[1320px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_12px_32px_#0F172A0F] lg:flex-row',
+          'stroke flex w-full max-w-[82.5rem] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_0.75rem_2rem_#0F172A0F] lg:flex-row',
           ENTRY_CARD_HEIGHT,
         )}
       >
         <div className="flex min-w-0 flex-1 flex-col gap-5 px-10 py-7 short:gap-4 short:py-5">
           {/* Logo ao lado do título: a largura sobra, a altura não. */}
           <div className="flex items-center gap-5">
-            <img src="/muralis-logo-full.png" alt="Muralis" className="h-[62px] w-[110px] shrink-0 object-contain" />
+            <img src="/muralis-logo-full.png" alt="Muralis" className="h-[3.875rem] w-[6.875rem] shrink-0 object-contain" />
             <h1 className="min-w-0 text-2xl font-bold tracking-[-0.4px] text-ink">Release Management</h1>
           </div>
 
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold tracking-[0.6px] text-mute">{t('pat.platforms')}</span>
-              <span className="text-[12.5px] text-mute">{t('pat.connectedCount', { count: connectedCount })}</span>
+              <span className="text-[0.78125rem] text-mute">{t('pat.connectedCount', { count: connectedCount })}</span>
             </div>
 
             {PLATFORMS.map((platform) => {
@@ -611,14 +612,14 @@ export function PatConnectPage({ defaultOrganization }: { defaultOrganization: s
               disabled={!hasSource}
               onClick={() => navigate('/')}
               className={cx(
-                'flex h-12 items-center justify-center gap-2 rounded-[10px] text-[15px] font-semibold',
+                'flex h-12 items-center justify-center gap-2 rounded-[0.625rem] text-[0.9375rem] font-semibold',
                 hasSource ? 'hover-primary bg-ink text-white' : 'bg-[#E2E8F0] text-faint',
               )}
             >
               {t('pat.continue')}
-              <ArrowRight size={16} />
+              <ArrowRight size={rem(16)} />
             </button>
-            <p className="text-center text-[12.5px] leading-[1.45] text-mute short:hidden">
+            <p className="text-center text-[0.78125rem] leading-[1.45] text-mute short:hidden">
               {t('pat.continueHint')}
             </p>
           </div>

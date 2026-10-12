@@ -30,6 +30,8 @@ export interface Session {
 }
 
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+// Teto de sessões vivas: acima dele saem as mais antigas, para a memória (e o arquivo) não crescerem sem limite.
+const MAX_SESSIONS = 10_000;
 
 // Sessões ficam em memória e num arquivo cifrado, para os refresh tokens sobreviverem a um restart sem ficarem legíveis em disco.
 export class SessionStore {
@@ -61,6 +63,11 @@ export class SessionStore {
   create(data: Omit<Session, 'id' | 'createdAt'>): Session {
     const session: Session = { ...data, id: randomBytes(32).toString('base64url'), createdAt: Date.now() };
     this.sessions.set(session.id, session);
+    this.dropExpired();
+    for (const oldest of this.sessions.keys()) {
+      if (this.sessions.size <= MAX_SESSIONS) break;
+      this.sessions.delete(oldest);
+    }
     this.persist();
     return session;
   }
@@ -73,6 +80,12 @@ export class SessionStore {
       return undefined;
     }
     return session;
+  }
+
+  // Sessões vencidas que ninguém voltou a usar não ficam guardadas para sempre.
+  private dropExpired() {
+    const limit = Date.now() - MAX_AGE_MS;
+    for (const [id, session] of this.sessions) if (session.createdAt < limit) this.sessions.delete(id);
   }
 
   // Altera a sessão no lugar e grava.
@@ -112,6 +125,7 @@ export class SessionStore {
         }
         this.sessions.set(session.id, session);
       }
+      this.dropExpired();
     } catch {
       // Arquivo ausente ou cifrado com outro segredo: começa sem sessões e os usuários entram de novo.
     }

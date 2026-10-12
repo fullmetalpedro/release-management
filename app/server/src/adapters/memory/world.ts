@@ -111,7 +111,8 @@ export function createWorld(now = Date.now()): World {
   open('getnota-web', 642, 'fix: paginação da listagem de notas fiscais', PEDRO, 3 * HOUR, [[MANOEL, 'waiting-author'], [ANA, 'pending']], { commentCount: 5, mergeState: 'conflicts', conflictCount: 1 });
   open('getnota-api', 1279, 'refactor: extrair serviço de cálculo de impostos', PEDRO, 4 * DAY, [[MANOEL, 'waiting-author'], [ANA, 'pending']], { commentCount: 7 });
   open('getnota-web', 650, 'feat: filtro por CNPJ no dashboard', PEDRO, 5 * HOUR, [[MANOEL, 'pending'], [ANA, 'pending']], { commentCount: 1 });
-  open('getnota-api', 1290, 'chore: atualizar Spring Boot para 3.4', MANOEL, DAY + HOUR, [[ANA, 'approved'], [BRUNO, 'pending']]);
+  // Aberto sem nenhum revisor: fica em "Em revisão" com o aviso no card.
+  open('getnota-api', 1290, 'chore: atualizar Spring Boot para 3.4', MANOEL, DAY + HOUR, []);
   open('getnota-infra', 88, 'feat: pipeline de deploy em homologação', PEDRO, 2 * DAY + HOUR, [[MANOEL, 'approved'], [ANA, 'pending']], { targetBranch: 'main', commentCount: 2 });
   open('getnota-api', 1265, 'feat: exportar relatório de horas em CSV', PEDRO, 3 * DAY, [[MANOEL, 'approved'], [ANA, 'pending']], { commentCount: 2, mergeState: 'conflicts', conflictCount: 3 });
   open('getnota-web', 631, 'fix: máscara de CPF nos formulários de cadastro', MANOEL, 6 * DAY, [[ANA, 'approved'], [BRUNO, 'approved']], { mergeState: 'conflicts', conflictCount: 1 });

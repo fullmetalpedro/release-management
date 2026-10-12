@@ -1,119 +1,144 @@
-export type ProviderId = 'azure-devops' | 'github' | 'jira';
+import { z } from 'zod';
 import { localeTag, t } from './i18n';
+
+// Formato de tudo o que o servidor responde. Os tipos da interface saem destes esquemas, e cada resposta é
+// conferida contra eles ao chegar: um proxy no caminho pode devolver 200 com uma página de erro ou um JSON de outra
+// coisa, e isso vira erro de sincronização em vez de quebrar a tela.
+
+// Campo que pode faltar. O servidor omite; null é aceito e tratado igual.
+const optional = <T extends z.ZodType>(schema: T) => schema.nullish().transform((value) => value ?? undefined);
+
+const providerId = z.enum(['azure-devops', 'github', 'jira']);
+export type ProviderId = z.infer<typeof providerId>;
 export type BoardColumnId = 'dependsOnMe' | 'review' | 'conflict' | 'ready';
 
-export interface PersonView {
-  name: string;
-  isMe: boolean;
-  avatarKey?: string;
-}
+const repositoryRef = z.object({ id: z.string(), name: z.string() });
 
-export interface Me {
-  user: { name: string; email?: string; avatarKey?: string };
-  demo: boolean;
-  mode: 'microsoft' | 'demo' | 'pat';
-  loginProvider: 'microsoft';
-  organization: string;
+const personView = z.object({ name: z.string(), isMe: z.boolean(), avatarKey: optional(z.string()) });
+export type PersonView = z.infer<typeof personView>;
+
+const platform = z.object({ provider: providerId, name: z.string() });
+const me = z.object({
+  user: z.object({ name: z.string(), email: optional(z.string()), avatarKey: optional(z.string()) }),
+  demo: z.boolean(),
+  mode: z.enum(['microsoft', 'demo', 'pat']),
+  organization: z.string(),
   // De onde vêm os PRs e de onde vêm as tasks; sem tracker (GitHub sem Jira) não há tasks a vincular.
-  source: { provider: ProviderId; name: string } | null;
-  tracker: { provider: ProviderId; name: string } | null;
-  accounts: { provider: ProviderId; connected: boolean; active?: boolean; handle?: string; account?: string }[];
-}
+  source: platform.nullable(),
+  tracker: platform.nullable(),
+  accounts: z.array(
+    z.object({
+      provider: providerId,
+      connected: z.boolean(),
+      active: optional(z.boolean()),
+      handle: optional(z.string()),
+      account: optional(z.string()),
+    }),
+  ),
+});
+export type Me = z.infer<typeof me>;
 
-export interface ProjectView {
-  id: string;
-  name: string;
-  openPullRequests: number;
-}
+const projectView = z.object({ id: z.string(), name: z.string(), openPullRequests: z.number() });
+export type ProjectView = z.infer<typeof projectView>;
 
-export interface PullRequestCard {
-  id: number;
-  provider: ProviderId;
-  title: string;
-  repository: { id: string; name: string };
-  targetBranch: string;
-  author: PersonView;
-  createdAt: string;
-  commentCount: number;
-  conflictCount: number;
-  approvals: number;
-  reviewers: number;
-  approved: boolean;
-  reason?: 'reviewer' | 'waiting-author';
-  requiredReviewer: boolean;
-  webUrl: string;
-}
+const pullRequestCard = z.object({
+  id: z.number(),
+  provider: providerId,
+  title: z.string(),
+  repository: repositoryRef,
+  targetBranch: z.string(),
+  author: personView,
+  createdAt: z.string(),
+  commentCount: z.number(),
+  conflictCount: z.number(),
+  approvals: z.number(),
+  reviewers: z.number(),
+  approved: z.boolean(),
+  noReviewers: z.boolean(),
+  reason: optional(z.enum(['reviewer', 'waiting-author'])),
+  requiredReviewer: z.boolean(),
+  webUrl: z.string(),
+});
+export type PullRequestCard = z.infer<typeof pullRequestCard>;
 
-export interface Board {
-  syncedAt: string;
-  openCount: number;
-  columns: Record<BoardColumnId, PullRequestCard[]>;
-  repositories: { id: string; name: string }[];
-}
+const cards = z.array(pullRequestCard).default([]);
+const board = z.object({
+  syncedAt: z.string(),
+  columns: z.object({ dependsOnMe: cards, review: cards, conflict: cards, ready: cards }),
+  repositories: z.array(repositoryRef),
+});
+export type Board = z.infer<typeof board>;
 
-export interface LanePullRequest {
-  id: number;
-  title: string;
-  author: PersonView;
-  mergedAt?: string;
-  webUrl: string;
-}
+const lanePullRequest = z.object({
+  id: z.number(),
+  title: z.string(),
+  author: personView,
+  mergedAt: optional(z.string()),
+  webUrl: z.string(),
+});
+export type LanePullRequest = z.infer<typeof lanePullRequest>;
 
-export interface ReleaseView {
-  name: string;
-  isLatest: boolean;
-  createdAt?: string;
-  createdBy?: PersonView;
-  baseBranch?: string;
-  webUrl: string;
-}
+const releaseView = z.object({
+  name: z.string(),
+  isLatest: z.boolean(),
+  createdAt: optional(z.string()),
+  createdBy: optional(personView),
+  baseBranch: optional(z.string()),
+  webUrl: z.string(),
+});
+export type ReleaseView = z.infer<typeof releaseView>;
 
-export interface ReleaseLane {
-  syncedAt: string;
-  repository: { id: string; name: string };
-  merged: LanePullRequest[];
-  suggestedBranch: string;
-  baseBranch: string;
-  release: (ReleaseView & { pullRequests: LanePullRequest[] }) | null;
-}
+const releaseLane = z.object({
+  syncedAt: z.string(),
+  repository: repositoryRef,
+  merged: z.array(lanePullRequest),
+  suggestedBranch: z.string(),
+  baseBranch: z.string(),
+  release: releaseView.extend({ pullRequests: z.array(lanePullRequest) }).nullable(),
+});
+export type ReleaseLane = z.infer<typeof releaseLane>;
 
-export type WorkItemKind = 'pbi' | 'task' | 'bug' | 'other';
-export type WorkItemStateCategory = 'todo' | 'in-progress' | 'testing' | 'done' | 'removed';
+const releaseLanes = z.object({ syncedAt: z.string(), lanes: z.array(releaseLane) });
 
-export interface WorkItemSummary {
-  id: number;
+// Tipo ou estado que esta versão da interface ainda não conhece cai no genérico, em vez de invalidar a resposta.
+const workItemKind = z.enum(['pbi', 'task', 'bug', 'other']).catch('other');
+const workItemStateCategory = z.enum(['todo', 'in-progress', 'testing', 'done', 'removed']).catch('todo');
+export type WorkItemKind = z.infer<typeof workItemKind>;
+export type WorkItemStateCategory = z.infer<typeof workItemStateCategory>;
+
+const workItemSummary = z.object({
+  id: z.number(),
   // Chave legível, quando a plataforma tem uma (PROJ-7 no Jira).
-  key?: string;
-  title: string;
-  kind: WorkItemKind;
-  state: { name: string; category: WorkItemStateCategory };
-  webUrl: string;
-}
+  key: optional(z.string()),
+  title: z.string(),
+  kind: workItemKind,
+  state: z.object({ name: z.string(), category: workItemStateCategory }),
+  webUrl: z.string(),
+});
+export type WorkItemSummary = z.infer<typeof workItemSummary>;
 
-export interface WorkItem extends WorkItemSummary {
-  parent?: WorkItemSummary;
-}
+const workItem = workItemSummary.extend({ parent: optional(workItemSummary) });
+export type WorkItem = z.infer<typeof workItem>;
 
-export interface ReleaseDetails {
-  syncedAt: string;
-  repository: { id: string; name: string };
-  release: ReleaseView | null;
-  summary: { pullRequests: number; tasks: number; pbis: number; unlinked: number };
-  groups: {
-    pbi: WorkItemSummary;
-    tasks: number;
-    pullRequests: number;
-    rows: { task: WorkItemSummary | null; pullRequest: LanePullRequest }[];
-  }[];
-  unlinked: (LanePullRequest & { suggestedTerm: string })[];
-}
+const releaseDetails = z.object({
+  syncedAt: z.string(),
+  repository: repositoryRef,
+  release: releaseView.nullable(),
+  summary: z.object({ pullRequests: z.number(), tasks: z.number(), pbis: z.number(), unlinked: z.number() }),
+  groups: z.array(
+    z.object({
+      pbi: workItemSummary,
+      tasks: z.number(),
+      pullRequests: z.number(),
+      rows: z.array(z.object({ task: workItemSummary.nullable(), pullRequest: lanePullRequest })),
+    }),
+  ),
+  unlinked: z.array(lanePullRequest.extend({ suggestedTerm: z.string() })),
+});
+export type ReleaseDetails = z.infer<typeof releaseDetails>;
 
-export interface CreatedRelease {
-  name: string;
-  pullRequests: number;
-  repository: string;
-  webUrl: string;
-}
+const createdRelease = z.object({ name: z.string(), pullRequests: z.number(), repository: z.string(), webUrl: z.string() });
+export type CreatedRelease = z.infer<typeof createdRelease>;
 
 export class ApiError extends Error {
   constructor(
@@ -126,7 +151,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+async function request<T = void>(method: string, path: string, body?: unknown, schema?: z.ZodType<T>): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -146,7 +173,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(0, 'network', t('errors.offline'));
   }
   if (response.status === 204) return undefined as T;
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsed: unknown = await response.json().catch(() => undefined);
+  const payload = isObject(parsed) ? parsed : {};
   if (!response.ok) {
     throw new ApiError(
       response.status,
@@ -155,38 +183,43 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       payload,
     );
   }
-  return payload as T;
+  if (!schema) return parsed as T;
+  const checked = schema.safeParse(parsed);
+  if (!checked.success) {
+    console.warn(`Resposta inesperada de ${path}:`, z.prettifyError(checked.error));
+    throw new ApiError(response.status, 'bad-response', t('errors.badResponse'));
+  }
+  return checked.data;
 }
+
+const get = <T,>(path: string, schema: z.ZodType<T>) => request('GET', path, undefined, schema);
 
 const repo = (projectId: string, repositoryId: string) =>
   `/api/projects/${encodeURIComponent(projectId)}/repositories/${encodeURIComponent(repositoryId)}`;
 
 export const api = {
-  me: () => request<Me>('GET', '/api/me'),
-  logout: () => request<void>('POST', '/auth/logout'),
-  setActiveSource: (provider: ProviderId) => request<void>('POST', '/auth/active', { provider }),
-  projects: () => request<ProjectView[]>('GET', '/api/projects'),
-  board: (projectId: string) => request<Board>('GET', `/api/projects/${encodeURIComponent(projectId)}/board`),
+  me: () => get('/api/me', me),
+  logout: () => request('POST', '/auth/logout'),
+  setActiveSource: (provider: ProviderId) => request('POST', '/auth/active', { provider }),
+  projects: () => get('/api/projects', z.array(projectView)),
+  board: (projectId: string) => get(`/api/projects/${encodeURIComponent(projectId)}/board`, board),
   lanes: (projectId: string) =>
-    request<{ syncedAt: string; lanes: ReleaseLane[] }>('GET', `/api/projects/${encodeURIComponent(projectId)}/lanes`),
+    get(`/api/projects/${encodeURIComponent(projectId)}/lanes`, releaseLanes),
   lane: (projectId: string, repositoryId: string) =>
-    request<ReleaseLane>('GET', `${repo(projectId, repositoryId)}/lane`),
+    get(`${repo(projectId, repositoryId)}/lane`, releaseLane),
   release: (projectId: string, repositoryId: string, branch?: string) =>
-    request<ReleaseDetails>(
-      'GET',
+    get(
       `${repo(projectId, repositoryId)}/release${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
+      releaseDetails,
     ),
   createRelease: (projectId: string, repositoryId: string, name: string, pullRequestIds: number[]) =>
-    request<CreatedRelease>('POST', `${repo(projectId, repositoryId)}/releases`, { name, pullRequestIds }),
+    request('POST', `${repo(projectId, repositoryId)}/releases`, { name, pullRequestIds }, createdRelease),
   searchWorkItems: (projectId: string, term: string) =>
-    request<WorkItem[]>(
-      'GET',
-      `/api/projects/${encodeURIComponent(projectId)}/work-items?q=${encodeURIComponent(term)}`,
-    ),
+    get(`/api/projects/${encodeURIComponent(projectId)}/work-items?q=${encodeURIComponent(term)}`, z.array(workItem)),
   linkWorkItem: (projectId: string, repositoryId: string, pullRequestId: number, workItemId: number) =>
-    request<void>('PUT', `${repo(projectId, repositoryId)}/pull-requests/${pullRequestId}/work-items/${workItemId}`),
+    request('PUT', `${repo(projectId, repositoryId)}/pull-requests/${pullRequestId}/work-items/${workItemId}`),
   unlinkWorkItem: (projectId: string, repositoryId: string, pullRequestId: number, workItemId: number) =>
-    request<void>(
+    request(
       'DELETE',
       `${repo(projectId, repositoryId)}/pull-requests/${pullRequestId}/work-items/${workItemId}`,
     ),

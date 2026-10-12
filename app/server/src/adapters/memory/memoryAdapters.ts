@@ -1,4 +1,4 @@
-import { CherryPickConflictError, NotFoundError, ProviderUnavailableError } from '../../core/domain/errors.ts';
+import { CherryPickConflictError, NotFoundError, ProviderUnavailableError, ValidationError } from '../../core/domain/errors.ts';
 import type {
   Person,
   Project,
@@ -100,6 +100,10 @@ export class MemorySourceControl implements SourceControl {
     const conflicting = input.pullRequestIds.find((id) => this.faults.conflictingPullRequestIds?.includes(id));
     if (conflicting !== undefined) throw new CherryPickConflictError(conflicting, input.baseBranch);
 
+    // Como nos provedores de verdade, criar uma branch que já existe falha.
+    if (this.world.releases.some((r) => r.repositoryId === input.repository.id && r.name === input.name)) {
+      throw new ValidationError(msg('branchExists', { branch: input.name }));
+    }
     this.world.releases.push({
       name: input.name,
       repositoryId: input.repository.id,
