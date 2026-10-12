@@ -7,6 +7,7 @@ import { GitHubSourceControl } from '../github/sourceControl.ts';
 import { JiraWorkTracking, parseJiraSite, resolveCloudId } from '../jira/workTracking.ts';
 import type { PatProvider } from '../session/sessionStore.ts';
 import { parseGitHubOwner, parseOrganization } from './patTransport.ts';
+import { msg } from '../../i18n.ts';
 
 export const PAT_PROVIDERS: PatProvider[] = ['azure-devops', 'github', 'jira'];
 
@@ -39,7 +40,7 @@ export function parseAccount(provider: PatProvider, body: { organization?: unkno
   if (provider === 'azure-devops') return { account: parseOrganization(body.organization) };
   if (provider === 'github') return { account: parseGitHubOwner(body.organization) };
   const email = typeof body.email === 'string' ? body.email.trim() : '';
-  if (!EMAIL.test(email)) throw new ValidationError('Informe o e-mail da sua conta Atlassian.');
+  if (!EMAIL.test(email)) throw new ValidationError(msg('atlassianEmailRequired'));
   return { account: parseJiraSite(body.site), email };
 }
 

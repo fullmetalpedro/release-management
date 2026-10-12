@@ -14,7 +14,8 @@ import {
   SquareCheckBig,
   TriangleAlert,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { useToast } from '../components/toast';
 import { TopBar } from '../components/TopBar';
@@ -31,6 +32,7 @@ import { authorLabel, elapsedLabel, releaseMeta, shortDate, useNow } from '../li
 import { LANE_STALE_MS, releaseKey, SYNC_INTERVAL_MS, useAllLanes } from '../lib/lanes';
 import { useSession } from '../lib/session';
 import { useViewNavigate } from '../lib/transition';
+import { t } from '../lib/i18n';
 
 const PILL: Record<WorkItemStateCategory, string> = {
   done: 'bg-[#DCFCE7] text-[#166534]',
@@ -62,13 +64,13 @@ function PullRequestCells({ pr }: { pr: LanePullRequest }) {
         <a href={pr.webUrl} target="_blank" rel="noreferrer" className="font-mono text-xs text-mute hover:underline">
           #{pr.id}
         </a>
-        <span className="truncate text-[13px] text-ink">{pr.title}</span>
+        <span className="truncate text-[13px] text-ink" title={pr.title}>{pr.title}</span>
       </div>
       <div className="flex w-[170px] shrink-0 items-center gap-2">
         <Avatar name={pr.author.name} isMe={pr.author.isMe} avatarKey={pr.author.avatarKey} />
         <span className="truncate text-[13px] text-ink-2">{authorLabel(pr.author)}</span>
       </div>
-      <div className="w-20 shrink-0 text-[13px] text-mute">{shortDate(pr.mergedAt)}</div>
+      <div className="w-20 shrink-0 whitespace-nowrap text-[13px] text-mute">{shortDate(pr.mergedAt)}</div>
     </>
   );
 }
@@ -80,16 +82,29 @@ const RESULTS_MAX = 280;
 interface PopoverPlacement {
   above: boolean;
   resultsMaxHeight: number;
+  // Posição fixa na janela, em px da interface (que é desenhada com zoom).
+  left: number;
+  top?: number;
+  bottom?: number;
 }
 
-// O popover abre para o lado com mais espaço e nunca passa da borda da janela, para não criar rolagem na página.
+const GAP = 8;
+
+// O popover fica fora da tabela (que rola sozinha e cortaria o conteúdo) e é posicionado pelo botão. Abre para cima
+// ou para baixo, o lado com mais espaço, e a lista encolhe para não passar da borda da janela.
 function placePopover(anchor: DOMRect): PopoverPlacement {
+  const root = document.getElementById('root');
+  const zoom = Number(root ? getComputedStyle(root).zoom : 1) || 1;
   const margin = 16;
   const below = window.innerHeight - anchor.bottom - margin;
   const aboveSpace = anchor.top - margin;
   const above = below < POPOVER_CHROME + 160 && aboveSpace > below;
-  const available = (above ? aboveSpace : below) - POPOVER_CHROME;
-  return { above, resultsMaxHeight: Math.max(56, Math.min(RESULTS_MAX, available)) };
+  const available = ((above ? aboveSpace : below) - GAP) / zoom - POPOVER_CHROME;
+  const resultsMaxHeight = Math.max(56, Math.min(RESULTS_MAX, available));
+  const left = anchor.left / zoom;
+  return above
+    ? { above, resultsMaxHeight, left, bottom: (window.innerHeight - anchor.top + GAP) / zoom }
+    : { above, resultsMaxHeight, left, top: (anchor.bottom + GAP) / zoom };
 }
 
 function LinkTaskPopover({
@@ -98,12 +113,14 @@ function LinkTaskPopover({
   linking,
   placement,
   onPick,
+  containerRef,
 }: {
   projectId: string;
   initialTerm: string;
   linking: boolean;
   placement: PopoverPlacement;
   onPick: (item: WorkItem) => void;
+  containerRef: RefObject<HTMLDivElement | null>;
 }) {
   const { tracker } = useSession().me;
   const jira = tracker?.provider === 'jira';
@@ -128,6 +145,14 @@ function LinkTaskPopover({
   });
   const items = results.data ?? [];
   useEffect(() => setActive(0), [debounced]);
+  // Enquanto a busca do que foi digitado não volta, a lista ainda é a da busca anterior.
+  const searching = results.isFetching || term.trim() !== debounced;
+  const listId = useId();
+  const optionId = (index: number) => `${listId}-${index}`;
+  useEffect(() => {
+    document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'ArrowDown') {
@@ -136,21 +161,25 @@ function LinkTaskPopover({
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       setActive((index) => Math.max(index - 1, 0));
-    } else if (event.key === 'Enter' && items[active] && !linking) {
+    } else if (event.key === 'Enter') {
       event.preventDefault();
-      onPick(items[active]);
+      // Enter antes de a busca voltar vincularia o primeiro item da lista antiga, não o que foi digitado.
+      if (items[active] && !linking && !searching) onPick(items[active]);
     }
   };
 
-  const searching = results.isFetching || term.trim() !== debounced;
-  return (
+  const root = document.getElementById('root');
+  if (!root) return null;
+  return createPortal(
     <div
+      ref={containerRef}
       role="dialog"
-      aria-label="Vincular task"
+      aria-label={t('release.linkTask')}
       className={cx(
-        'stroke absolute left-0 z-30 flex w-[420px] max-w-[calc(100vw-48px)] flex-col gap-0.5 rounded-xl bg-white p-1.5 shadow-[0_12px_32px_#0F172A26]',
-        placement.above ? 'pop-in-up bottom-full mb-2' : 'pop-in top-full mt-2',
+        'stroke fixed z-50 flex w-[420px] max-w-[calc(100vw-48px)] flex-col gap-0.5 rounded-xl bg-white p-1.5 shadow-[0_12px_32px_#0F172A26]',
+        placement.above ? 'pop-in-up' : 'pop-in',
       )}
+      style={{ left: placement.left, top: placement.top, bottom: placement.bottom }}
     >
       <label className="stroke-focus flex items-center gap-2 rounded-lg bg-soft px-3 py-2.5">
         <Search size={14} className="shrink-0 text-[#6366F1]" />
@@ -159,23 +188,35 @@ function LinkTaskPopover({
           value={term}
           onChange={(event) => setTerm(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={jira ? 'Buscar issue por título ou chave' : 'Buscar task por título ou id'}
-          aria-label="Buscar task"
+          placeholder={jira ? t('release.searchJira') : t('release.searchTask')}
+          aria-label={t('release.searchAria')}
+          role="combobox"
+          aria-expanded={items.length > 0}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={items[active] ? optionId(active) : undefined}
           className="min-w-0 flex-1 bg-transparent text-[13px] text-ink caret-[#6366F1] outline-none placeholder:text-faint"
         />
         {searching && <LoaderCircle size={14} className="shrink-0 animate-spin text-faint" />}
       </label>
       <div className="px-3 pb-1 pt-2.5 text-[11px] font-semibold tracking-[0.5px] text-faint">
-        {term.trim() === initialTerm && initialTerm ? 'SUGESTÕES PELO TÍTULO DO PR' : 'RESULTADOS'}
+        {term.trim() === initialTerm && initialTerm ? t('release.suggestions') : t('release.results')}
       </div>
-      <div role="listbox" className="flex flex-col gap-0.5 overflow-y-auto" style={{ maxHeight: placement.resultsMaxHeight }}>
+      <div
+        id={listId}
+        role="listbox"
+        aria-busy={searching}
+        className={cx('flex flex-col gap-0.5 overflow-y-auto transition-opacity', searching && items.length > 0 && 'opacity-50')}
+        style={{ maxHeight: placement.resultsMaxHeight }}
+      >
         {items.map((item, index) => (
           <button
             key={item.id}
+            id={optionId(index)}
             type="button"
             role="option"
             aria-selected={index === active}
-            disabled={linking}
+            disabled={linking || searching}
             onMouseEnter={() => setActive(index)}
             onClick={() => onPick(item)}
             className={cx('flex gap-2.5 rounded-lg px-3 py-2.5 text-left', index === active && 'bg-[#EEF2FF]')}
@@ -187,7 +228,11 @@ function LinkTaskPopover({
                 <span className="truncate text-[13px] font-medium text-ink">{item.title}</span>
               </span>
               <span className="truncate text-xs text-faint">
-                {item.parent ? `${item.parent.key ?? `PBI ${item.parent.id}`} · ${item.parent.title}` : jira ? 'Sem épico pai' : 'Sem PBI pai'}
+                {item.parent
+                  ? `${item.parent.key ?? `PBI ${item.parent.id}`} · ${item.parent.title}`
+                  : jira
+                    ? t('release.noParentEpic')
+                    : t('release.noParentPbi')}
               </span>
             </span>
             {index === active && <span className="text-[13px] font-semibold text-[#6366F1]">↵</span>}
@@ -196,18 +241,19 @@ function LinkTaskPopover({
         {items.length === 0 && (
           <p className="px-3 py-2.5 text-xs text-faint">
             {results.isError
-              ? `Não foi possível buscar no ${tracker?.name ?? 'Jira'}.`
+              ? t('release.searchFailed', { tracker: tracker?.name ?? 'Jira' })
               : searching
-                ? 'Buscando…'
+                ? t('release.searching')
                 : debounced.length < 2
                   ? jira
-                    ? 'Digite ao menos 2 letras ou a chave da issue.'
-                    : 'Digite ao menos 2 letras ou o id da task.'
-                  : 'Nenhuma task encontrada.'}
+                    ? t('release.typeMoreJira')
+                    : t('release.typeMore')
+                  : t('release.noneFound')}
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    root,
   );
 }
 
@@ -222,14 +268,27 @@ function UnlinkedRow({
   linking: boolean;
   onLink: (pr: LanePullRequest, item: WorkItem, done: () => void) => void;
 }) {
-  const { open, setOpen, ref } = useDropdown();
-  const [placement, setPlacement] = useState<PopoverPlacement>({ above: false, resultsMaxHeight: RESULTS_MAX });
+  const { open, setOpen, ref, portalRef } = useDropdown();
+  const [placement, setPlacement] = useState<PopoverPlacement>({ above: false, resultsMaxHeight: RESULTS_MAX, left: 0 });
   const { tracker } = useSession().me;
+  // O popover fica parado na janela: se a tabela ou a janela rolarem, ele fecharia longe do botão.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (event: Event) => {
+      if (!portalRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [open, portalRef, setOpen]);
   return (
     <div className="flex items-center gap-4 px-5 py-3">
       <div className="flex min-w-0 flex-1 basis-0">
         {/* Com o GitHub sem Jira não há de onde buscar tasks. */}
-        {!tracker && <span className="ml-7 text-[13px] text-faint">Conecte o Jira para vincular tasks</span>}
+        {!tracker && <span className="ml-7 text-[13px] text-faint">{t('release.connectJira')}</span>}
         <div ref={ref} className={cx('relative ml-7', !tracker && 'hidden')}>
           <button
             type="button"
@@ -245,7 +304,7 @@ function UnlinkedRow({
             )}
           >
             <LinkIcon size={13} className="text-[#B45309]" />
-            <span className="text-[12.5px] font-semibold text-[#92400E]">Vincular task</span>
+            <span className="text-[12.5px] font-semibold text-[#92400E]">{t('release.linkTask')}</span>
           </button>
           {open && (
             <LinkTaskPopover
@@ -253,6 +312,7 @@ function UnlinkedRow({
               initialTerm={pr.suggestedTerm}
               linking={linking}
               placement={placement}
+              containerRef={portalRef}
               onPick={(item) => onLink(pr, item, () => setOpen(false))}
             />
           )}
@@ -335,37 +395,43 @@ export function ReleasePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, prefetchKey, details.isFetched]);
   const data = details.data;
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['release', projectId, repositoryId] });
+  // Cada vínculo carrega o repositório em que foi feito: se o usuário trocar de repositório antes de a resposta
+  // chegar (ou antes de clicar em "Desfazer"), a operação continua valendo para o repositório certo.
+  type Target = { projectId: string; repositoryId: string };
+  const invalidate = (target: Target) =>
+    queryClient.invalidateQueries({ queryKey: ['release', target.projectId, target.repositoryId] });
 
   const unlink = useMutation({
-    mutationFn: (input: { pullRequestId: number; workItemId: number }) =>
-      api.unlinkWorkItem(projectId!, repositoryId!, input.pullRequestId, input.workItemId),
-    onSuccess: async () => {
+    mutationFn: (input: Target & { pullRequestId: number; workItemId: number }) =>
+      api.unlinkWorkItem(input.projectId, input.repositoryId, input.pullRequestId, input.workItemId),
+    onSuccess: async (_result, target) => {
       setFreshLink(null);
-      await invalidate();
+      await invalidate(target);
     },
-    onError: (error) => toast.show({ kind: 'error', title: 'Não foi possível desfazer o vínculo', description: error.message }),
+    onError: (error) => toast.show({ kind: 'error', title: t('release.unlinkFailed'), description: error.message }),
   });
 
   const link = useMutation({
-    mutationFn: (input: { pr: LanePullRequest; item: WorkItem; done: () => void }) =>
-      api.linkWorkItem(projectId!, repositoryId!, input.pr.id, input.item.id),
-    onSuccess: async (_result, { pr, item, done }) => {
-      await invalidate();
+    mutationFn: (input: Target & { pr: LanePullRequest; item: WorkItem; done: () => void }) =>
+      api.linkWorkItem(input.projectId, input.repositoryId, input.pr.id, input.item.id),
+    onSuccess: async (_result, { pr, item, done, ...target }) => {
+      await invalidate(target);
       done();
       setFreshLink({ pullRequestId: pr.id, workItemId: item.id });
       toast.show({
         kind: 'success',
-        title: `Task ${item.key ?? item.id} vinculada ao PR #${pr.id}`,
-        description: me.tracker ? `O vínculo também foi salvo no ${me.tracker.name}.` : undefined,
-        action: { label: 'Desfazer', onClick: () => unlink.mutate({ pullRequestId: pr.id, workItemId: item.id }) },
+        title: t('release.linked', { key: item.key ?? item.id, id: pr.id }),
+        description: me.tracker ? t('release.savedIn', { tracker: me.tracker.name }) : undefined,
+        action: { label: t('common.undo'), onClick: () => unlink.mutate({ ...target, pullRequestId: pr.id, workItemId: item.id }) },
       });
     },
-    onError: (error) => toast.show({ kind: 'error', title: 'Não foi possível vincular a task', description: error.message }),
+    onError: (error) => toast.show({ kind: 'error', title: t('release.linkFailed'), description: error.message }),
   });
 
   const release = data?.release;
-  const loading = !data && !details.isError;
+  const failed = !data && (details.isError || board.isError);
+  // Sem projeto ou sem repositório as consultas nem começam: não há o que esperar.
+  const loading = !data && !failed && !!projectId && (board.isPending || !!repositoryId);
   const viewNavigate = useViewNavigate();
 
   return (
@@ -378,11 +444,11 @@ export function ReleasePage() {
         <div className="flex min-w-0 flex-col gap-2.5">
           <div className="flex items-center gap-2.5">
             <GitBranch size={22} className="shrink-0 text-[#7C3AED]" />
-            <h1 className="truncate font-mono text-2xl font-bold tracking-[-0.3px] text-ink">
-              {release?.name ?? (loading ? 'Carregando…' : 'Sem release')}
+            <h1 className="truncate font-mono text-2xl font-bold tracking-[-0.3px] text-ink" title={release?.name}>
+              {release?.name ?? (loading ? t('common.loading') : failed ? t('release.loadFailed') : t('release.none'))}
             </h1>
             {release?.isLatest && (
-              <span className="rounded bg-[#EDE9FE] px-2 py-[3px] text-xs font-semibold text-[#6D28D9]">Última</span>
+              <span className="rounded bg-[#EDE9FE] px-2 py-[3px] text-xs font-semibold text-[#6D28D9]">{t('common.latest')}</span>
             )}
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -399,16 +465,16 @@ export function ReleasePage() {
               className="stroke flex items-center gap-1.5 rounded-md bg-white px-2.5 py-[5px] hover-surface"
             >
               <RefreshCw size={13} className={cx('text-ink-2', details.isFetching && 'animate-spin')} />
-              <span className="text-[12.5px] font-semibold text-ink">{details.isFetching ? 'Sincronizando' : 'Atualizar'}</span>
+              <span className="text-[12.5px] font-semibold text-ink">{details.isFetching ? t('common.syncing') : t('common.refresh')}</span>
             </button>
             <span
               className={cx('text-xs', details.isError || board.isError ? 'text-[#DC2626]' : 'text-faint')}
-              title={(details.isError || board.isError) && data ? `Última sincronização ${elapsedLabel(data.syncedAt, now)}` : undefined}
+              title={(details.isError || board.isError) && data ? t('common.lastSync', { when: elapsedLabel(data.syncedAt, now) }) : undefined}
             >
               {details.isError || board.isError
-                ? 'Falha ao sincronizar'
+                ? t('common.syncFailed')
                 : data
-                  ? `Sincronizado ${elapsedLabel(data.syncedAt, now)}`
+                  ? t('common.synced', { when: elapsedLabel(data.syncedAt, now) })
                   : ''}
             </span>
           </div>
@@ -421,7 +487,7 @@ export function ReleasePage() {
             className="stroke flex items-center gap-1.5 rounded-lg bg-white px-3.5 py-2 hover-surface"
           >
             <Minimize2 size={14} className="text-ink-2" />
-            <span className="text-[13px] font-medium text-ink">Voltar ao board</span>
+            <span className="text-[13px] font-medium text-ink">{t('release.back')}</span>
           </button>
           <div className="flex items-center gap-2.5">
             <RepoSelect
@@ -443,7 +509,7 @@ export function ReleasePage() {
             >
               <ExternalLink size={14} className={release ? 'text-white' : 'text-faint'} />
               <span className={cx('text-[13px] font-semibold', release ? 'text-white' : 'text-faint')}>
-                Abrir no {me.source?.name ?? 'Azure DevOps'}
+                {t('release.openIn', { source: me.source?.name ?? 'Azure DevOps' })}
               </span>
             </a>
           </div>
@@ -452,12 +518,12 @@ export function ReleasePage() {
 
       {data && release && (
         <div className="flex flex-wrap gap-x-10 gap-y-2 px-8 pb-5">
-          <Stat value={data.summary.pullRequests} label={data.summary.pullRequests === 1 ? 'PR na release' : 'PRs na release'} />
-          <Stat value={data.summary.tasks} label={data.summary.tasks === 1 ? 'task associada' : 'tasks associadas'} />
-          <Stat value={data.summary.pbis} label={jira ? (data.summary.pbis === 1 ? 'épico' : 'épicos') : data.summary.pbis === 1 ? 'PBI' : 'PBIs'} />
+          <Stat value={data.summary.pullRequests} label={t('release.statPrs', { count: data.summary.pullRequests })} />
+          <Stat value={data.summary.tasks} label={t('release.statTasks', { count: data.summary.tasks })} />
+          <Stat value={data.summary.pbis} label={t(jira ? 'release.statEpics' : 'release.statPbis', { count: data.summary.pbis })} />
           <Stat
             value={data.summary.unlinked}
-            label={data.summary.unlinked === 1 ? 'PR sem task' : 'PRs sem task'}
+            label={t('release.statUnlinked', { count: data.summary.unlinked })}
             tone={data.summary.unlinked > 0 ? 'warn' : 'ok'}
           />
         </div>
@@ -467,11 +533,11 @@ export function ReleasePage() {
       <main className="flex min-h-0 flex-1 flex-col px-8 pb-8">
         <div className="stroke column-scroll flex min-h-0 flex-col overflow-y-auto rounded-[10px] bg-white">
           <div className="sticky top-0 z-10 flex shrink-0 gap-4 rounded-t-[10px] border-b border-line bg-soft px-5 py-2.5 text-[11px] font-semibold tracking-[0.5px] text-mute">
-            <div className="flex-1 basis-0">WORK ITEM</div>
-            <div className="w-[140px] shrink-0">STATUS</div>
-            <div className="flex-1 basis-0">PULL REQUEST</div>
-            <div className="w-[170px] shrink-0">AUTOR</div>
-            <div className="w-20 shrink-0">MERGE</div>
+            <div className="flex-1 basis-0">{t('release.headWorkItem')}</div>
+            <div className="w-[140px] shrink-0">{t('release.headState')}</div>
+            <div className="flex-1 basis-0">{t('release.headPullRequest')}</div>
+            <div className="w-[170px] shrink-0">{t('release.headAuthor')}</div>
+            <div className="w-20 shrink-0">{t('release.headMerge')}</div>
           </div>
 
           {loading &&
@@ -484,11 +550,16 @@ export function ReleasePage() {
               </div>
             ))}
 
+          {failed && (
+            <p className="px-5 py-6 text-[13px] text-[#DC2626]">
+              {(details.error ?? board.error)?.message ?? t('common.syncFailed')}
+            </p>
+          )}
           {data && !release && (
-            <p className="px-5 py-6 text-[13px] text-mute">Este repositório ainda não tem branch de release.</p>
+            <p className="px-5 py-6 text-[13px] text-mute">{t('lanes.noReleaseBranch')}</p>
           )}
           {data && release && data.summary.pullRequests === 0 && (
-            <p className="px-5 py-6 text-[13px] text-mute">Nenhum PR identificado nesta release.</p>
+            <p className="px-5 py-6 text-[13px] text-mute">{t('lanes.noPrsInRelease')}</p>
           )}
 
           {data?.groups.map((group) => {
@@ -506,11 +577,10 @@ export function ReleasePage() {
                   <ChevronDown size={14} className={cx('shrink-0 text-faint transition-transform', isCollapsed && '-rotate-90')} />
                   <WorkItemIcon kind="pbi" size={15} />
                   <span className="whitespace-nowrap font-mono text-xs text-mute">{group.pbi.key ?? `PBI ${group.pbi.id}`}</span>
-                  <span className="truncate text-[13px] font-semibold text-ink">{group.pbi.title}</span>
+                  <span className="truncate text-[13px] font-semibold text-ink" title={group.pbi.title}>{group.pbi.title}</span>
                   <StatusPill state={group.pbi.state} />
                   <span className="ml-auto whitespace-nowrap pl-2 text-xs text-mute">
-                    {group.tasks} {group.tasks === 1 ? 'task' : 'tasks'} · {group.pullRequests}{' '}
-                    {group.pullRequests === 1 ? 'PR' : 'PRs'}
+                    {t('release.tasks', { count: group.tasks })} · {t('common.prCount', { count: group.pullRequests })}
                   </span>
                 </button>
                 {!isCollapsed &&
@@ -535,10 +605,10 @@ export function ReleasePage() {
                               >
                                 {row.task.key ?? row.task.id}
                               </a>
-                              <span className="truncate text-[13px] font-medium text-ink">{row.task.title}</span>
+                              <span className="truncate text-[13px] font-medium text-ink" title={row.task.title}>{row.task.title}</span>
                             </>
                           ) : (
-                            <span className="text-[13px] text-faint">{jira ? 'Vinculado direto' : 'Vinculado direto ao PBI'}</span>
+                            <span className="text-[13px] text-faint">{jira ? t('release.linkedDirectly') : t('release.linkedToPbi')}</span>
                           )}
                           </div>
                         </div>
@@ -557,8 +627,8 @@ export function ReleasePage() {
             <>
               <div className="flex items-center gap-2.5 border-y border-[#FDE68A] bg-[#FFFBEB] px-5 py-[11px] [&:not(:first-child)]:-mt-px">
                 <TriangleAlert size={15} className="shrink-0 text-[#B45309]" />
-                <span className="text-[13px] font-semibold text-[#92400E]">Sem work item associado</span>
-                <span className="truncate text-xs text-[#B45309]">PRs que entraram na release sem task vinculada</span>
+                <span className="text-[13px] font-semibold text-[#92400E]">{t('release.unlinkedTitle')}</span>
+                <span className="truncate text-xs text-[#B45309]">{t('release.unlinkedDescription')}</span>
               </div>
               {data.unlinked.map((pr) => (
                 <UnlinkedRow
@@ -566,7 +636,9 @@ export function ReleasePage() {
                   pr={pr}
                   projectId={projectId!}
                   linking={link.isPending}
-                  onLink={(target, item, done) => link.mutate({ pr: target, item, done })}
+                  onLink={(target, item, done) =>
+                    repositoryId && link.mutate({ projectId: projectId!, repositoryId, pr: target, item, done })
+                  }
                 />
               ))}
             </>

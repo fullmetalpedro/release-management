@@ -8,6 +8,8 @@ import type { MemoryFaults } from './adapters/memory/memoryAdapters.ts';
 export interface AppConfig {
   port: number;
   host: string;
+  // Atrás de um proxy reverso, o IP de quem chama vem em X-Forwarded-For.
+  trustProxy: boolean;
   appUrl: string;
   // Dados em memória, para demonstração e testes.
   demo: boolean;
@@ -62,6 +64,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const base = {
     port: Number(env.API_PORT ?? 3001),
     host: env.API_HOST ?? '127.0.0.1',
+    trustProxy: env.TRUST_PROXY === 'true',
     appUrl,
     projects: (env.AZDO_PROJECTS ?? '')
       .split(',')

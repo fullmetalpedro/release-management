@@ -6,9 +6,11 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import type { AppConfig } from '../../config.ts';
 import {
   CherryPickConflictError,
+  LocalizedError,
   NotAuthenticatedError,
   NotFoundError,
   ProviderUnavailableError,
+  RateLimitedError,
   ValidationError,
 } from '../../core/domain/errors.ts';
 import type { IdentityProvider } from '../../core/ports/identityProvider.ts';
@@ -27,8 +29,10 @@ import {
   type PatValidator,
 } from './patProviders.ts';
 import { PatTransport } from './patTransport.ts';
+import { RateLimiter } from './rateLimit.ts';
 import { PEDRO } from '../memory/world.ts';
 import type { PatProvider, Session, SessionStore, SourceProvider } from '../session/sessionStore.ts';
+import { localeFrom, msg, render } from '../../i18n.ts';
 
 const SESSION_COOKIE = 'rm_session';
 const OAUTH_COOKIE = 'rm_oauth';
@@ -44,9 +48,37 @@ export interface ServerDeps {
 
 const isSource = (provider: PatProvider): provider is SourceProvider => provider !== 'jira';
 
+const MAX_RELEASE_PULL_REQUESTS = 100;
+const AVATAR_TTL_MS = 6 * 60 * 60 * 1000;
+// "Sem foto" pode ser só uma falha passageira do provedor: vale por pouco tempo.
+const MISSING_AVATAR_TTL_MS = 10 * 60 * 1000;
+const MAX_CACHED_AVATARS = 2_000;
+const MAX_AVATAR_KEY_LENGTH = 420;
+// SVG fica de fora: servido da nossa origem, ele poderia rodar script.
+const AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+// Ids de projeto, repositório e afins viram segmento de URL do provedor. Os adapters codificam o segmento; aqui
+// barramos de saída o que nunca é um id legítimo (separadores de caminho, "..", caracteres de controle).
+const isSafeSegment = (value: string) =>
+  value.length > 0 && value.length <= 200 && value !== '.' && value !== '..' && !/[\/\\?#%\u0000-\u001f\u007f]/.test(value);
+
+const isPositiveInteger = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0;
+
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "img-src 'self' data:",
+  // O Tailwind e o sonner aplicam estilos inline.
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join('; ');
+
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const { config, sessions, registry, identityProvider } = deps;
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'warn' } });
+  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'warn' }, trustProxy: config.trustProxy });
   const secure = config.appUrl.startsWith('https://');
   await app.register(cookie, { secret: config.sessionSecret });
 
@@ -77,30 +109,66 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
   };
 
+  app.addHook('onSend', async (_request, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'no-referrer');
+    reply.header('X-Frame-Options', 'DENY');
+    if (!reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+    if (secure) reply.header('Strict-Transport-Security', 'max-age=31536000');
+  });
+
+  // As rotas de entrada são as únicas abertas a quem não tem sessão: limite por IP.
+  const authAttempts = new RateLimiter(60, 60_000);
+  const limitAuth = (request: FastifyRequest) => {
+    const { allowed, retryAfterSeconds } = authAttempts.take(request.ip);
+    if (!allowed) throw new RateLimitedError(retryAfterSeconds);
+  };
+  // Outro site não consegue enviar este cabeçalho sem CORS, o que barra CSRF nas escritas.
+  const requireFetchHeader = (request: FastifyRequest) => {
+    if (request.headers['x-requested-with'] !== 'fetch') throw new ValidationError(msg('invalidRequest'));
+  };
+
+  // Mensagens no idioma escolhido na interface, que o navegador manda em Accept-Language.
+  const localeOf = (request: FastifyRequest) => localeFrom(request.headers['accept-language']);
+  const say = (request: FastifyRequest, key: Parameters<typeof msg>[0], params?: Parameters<typeof msg>[1]) =>
+    render(msg(key, params), localeOf(request));
+
   app.setErrorHandler((error, request, reply) => {
+    const message = error instanceof LocalizedError ? error.messageIn(localeOf(request)) : '';
     if (error instanceof NotAuthenticatedError) {
       endSession(request, reply);
-      return reply.status(401).send({ code: 'unauthenticated', message: error.message });
+      return reply.status(401).send({ code: 'unauthenticated', message });
     }
     if (error instanceof CherryPickConflictError) {
       return reply.status(409).send({
         code: 'cherry-pick-conflict',
-        message: error.message,
+        message,
         pullRequestId: error.pullRequestId,
         baseBranch: error.baseBranch,
       });
     }
     if (error instanceof ProviderUnavailableError) {
-      return reply.status(502).send({ code: 'provider-unavailable', provider: error.provider, message: error.message });
+      return reply.status(502).send({ code: 'provider-unavailable', provider: error.provider, message });
     }
     if (error instanceof ValidationError) {
-      return reply.status(400).send({ code: 'invalid', message: error.message });
+      return reply.status(400).send({ code: 'invalid', message });
     }
     if (error instanceof NotFoundError) {
-      return reply.status(404).send({ code: 'not-found', message: error.message });
+      return reply.status(404).send({ code: 'not-found', message });
+    }
+    if (error instanceof RateLimitedError) {
+      return reply
+        .header('Retry-After', String(error.retryAfterSeconds))
+        .status(429)
+        .send({ code: 'rate-limited', message });
+    }
+    // Erros do próprio Fastify (JSON malformado, corpo grande demais) são do cliente, não nossos.
+    const status = (error as { statusCode?: number }).statusCode;
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      return reply.status(status).send({ code: 'invalid', message: say(request, 'invalidRequest') });
     }
     request.log.error(error);
-    return reply.status(500).send({ code: 'internal', message: 'Erro interno' });
+    return reply.status(500).send({ code: 'internal', message: say(request, 'internalError') });
   });
 
   // ---- Login ----
@@ -116,25 +184,28 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   if (!config.demo) {
     const transport = new PatTransport();
     const validatePat = deps.validatePat ?? createPatValidator(config);
-    const csrf = (request: FastifyRequest) => {
-      if (request.headers['x-requested-with'] !== 'fetch') throw new ValidationError('Requisição inválida');
-    };
 
-    app.get('/auth/pat/key', async () => ({ algorithm: 'RSA-OAEP-256', publicKey: transport.publicKeySpki }));
+    // A chave pública e um nonce de uso único para o próximo envio de token.
+    app.get('/auth/pat/key', async (request, reply) => {
+      limitAuth(request);
+      reply.header('Cache-Control', 'no-store');
+      return { algorithm: 'RSA-OAEP-256+A256GCM', publicKey: transport.publicKeySpki, nonce: transport.issueNonce() };
+    });
 
     // Conecta (ou troca) o token de uma plataforma. As conexões se somam na mesma sessão.
     app.post<{
       Params: { provider: string };
       Body: { organization?: unknown; site?: unknown; email?: unknown; encryptedToken?: unknown };
     }>('/auth/pat/:provider', async (request, reply) => {
-      csrf(request);
+      requireFetchHeader(request);
+      limitAuth(request);
       const provider = PAT_PROVIDERS.find((p) => p === request.params.provider);
-      if (!provider) throw new NotFoundError('Plataforma desconhecida');
+      if (!provider) throw new NotFoundError(msg('unknownPlatform'));
       const label = PROVIDER_LABELS[provider];
       const { account, email } = parseAccount(provider, request.body ?? {});
-      if (typeof request.body?.encryptedToken !== 'string') throw new ValidationError('Informe o token.');
+      if (typeof request.body?.encryptedToken !== 'string') throw new ValidationError(msg('tokenRequired'));
       const token = transport.decrypt(request.body.encryptedToken).trim();
-      if (token.length < 20 || token.length > 400) throw new ValidationError('Esse token não parece um token de acesso pessoal.');
+      if (token.length < 20 || token.length > 400) throw new ValidationError(msg('tokenMalformed'));
 
       let validation: PatValidation;
       try {
@@ -143,11 +214,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (error instanceof NotAuthenticatedError) {
           return reply.status(422).send({
             code: 'invalid-token',
-            message: `O ${label} recusou o token. Confira se ele é dessa conta, se não expirou e se tem os escopos do guia.`,
+            message: say(request, 'tokenRejected', { provider: label }),
           });
         }
         if (error instanceof ProviderUnavailableError && (error.status === 404 || error.status === 403)) {
-          return reply.status(422).send({ code: 'invalid-token', message: `O token não tem acesso a ${account}.` });
+          return reply.status(422).send({ code: 'invalid-token', message: say(request, 'tokenNoAccess', { account }) });
         }
         throw error;
       }
@@ -182,12 +253,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
     // Escolhe qual plataforma conectada fornece os PRs.
     app.post<{ Body: { provider?: unknown } }>('/auth/active', async (request, reply) => {
-      csrf(request);
+      requireFetchHeader(request);
       const session = sessionOf(request);
       if (!session) throw new NotAuthenticatedError();
       const provider = PAT_PROVIDERS.filter(isSource).find((p) => p === request.body?.provider);
       const connection = provider && session.connections?.[provider];
-      if (session.mode !== 'pat' || !provider || !connection) throw new ValidationError('Essa plataforma não está conectada.');
+      if (session.mode !== 'pat' || !provider || !connection) throw new ValidationError(msg('platformNotConnected'));
       sessions.update(session.id, (stored) => {
         stored.activeSource = provider;
         stored.user = { name: stored.user.name, email: connection.handle ?? stored.user.email };
@@ -198,8 +269,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }
 
   app.get('/auth/microsoft/login', async (request, reply) => {
+    limitAuth(request);
     if (config.demo) {
-      startSession(reply, sessions.create({ mode: 'demo', user: { name: PEDRO.name, email: PEDRO.email } }));
+      // Quem já está na demonstração continua na mesma sessão, em vez de acumular outra a cada visita.
+      if (!sessionOf(request)) {
+        startSession(reply, sessions.create({ mode: 'demo', user: { name: PEDRO.name, email: PEDRO.email } }));
+      }
       return reply.redirect(config.appUrl);
     }
     // Sem app registration o login com Microsoft não existe; a tela de entrada oferece o token.
@@ -217,6 +292,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   app.get('/auth/microsoft/callback', async (request, reply) => {
+    limitAuth(request);
     const query = request.query as { code?: string; state?: string; error?: string };
     const raw = request.cookies[OAUTH_COOKIE];
     reply.clearCookie(OAUTH_COOKIE, { path: '/auth' });
@@ -228,6 +304,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
     try {
       const { tokens, profile } = await identityProvider!.completeLogin(query.code, saved.codeVerifier);
+      // A sessão anterior deste navegador não sobrevive a uma nova entrada.
+      endSession(request, reply);
       startSession(reply, sessions.create({ mode: 'microsoft', user: profile, tokens }));
       return reply.redirect(config.appUrl);
     } catch (error) {
@@ -237,6 +315,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
 
   app.post('/auth/logout', async (request, reply) => {
+    requireFetchHeader(request);
     endSession(request, reply);
     return reply.status(204).send();
   });
@@ -246,34 +325,47 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.register(async (api) => {
     api.addHook('preHandler', async (request) => {
       if (!sessionOf(request)) throw new NotAuthenticatedError();
-      // Navegadores não deixam outro site enviar este cabeçalho sem CORS, o que barra CSRF nas escritas.
-      if (request.method !== 'GET' && request.headers['x-requested-with'] !== 'fetch') {
-        throw new ValidationError('Requisição inválida');
+      if (request.method !== 'GET') requireFetchHeader(request);
+      const params = (request.params ?? {}) as Record<string, string>;
+      for (const name of ['projectId', 'repositoryId'] as const) {
+        if (name in params && !isSafeSegment(params[name]!)) throw new ValidationError(msg('invalidId'));
+      }
+      for (const name of ['pullRequestId', 'workItemId'] as const) {
+        if (name in params && !/^[1-9]\d{0,14}$/.test(params[name]!)) throw new ValidationError(msg('invalidId'));
       }
     });
+
+    // Parâmetro repetido na URL (?q=a&q=b) chega como lista; só texto simples interessa.
+    const text = (value: unknown, maxLength: number) => (typeof value === 'string' ? value.slice(0, maxLength) : '');
 
     const connection = (request: FastifyRequest) => registry.for(sessionOf(request)!);
     type RepoParams = { projectId: string; repositoryId: string };
 
     // Fotos de perfil passam pelo servidor, porque o provedor só as entrega a quem está autenticado nele.
     const avatars = new Map<string, { at: number; avatar: { contentType: string; data: Buffer } | null }>();
-    const AVATAR_TTL_MS = 6 * 60 * 60 * 1000;
 
     api.get<{ Params: { key: string } }>('/avatars/:key', async (request, reply) => {
       const session = sessionOf(request)!;
+      if (request.params.key.length > MAX_AVATAR_KEY_LENGTH) throw new ValidationError(msg('invalidId'));
       const scope = session.activeSource ? `${session.activeSource}:${session.connections?.[session.activeSource]?.account}` : config.organization;
       const cacheKey = `${session.mode}|${scope}|${request.params.key}`;
       let cached = avatars.get(cacheKey);
-      if (!cached || Date.now() - cached.at > AVATAR_TTL_MS) {
+      if (!cached || Date.now() - cached.at > (cached.avatar ? AVATAR_TTL_MS : MISSING_AVATAR_TTL_MS)) {
         const avatar = await connection(request).sourceControl.getAvatar(request.params.key);
-        cached = { at: Date.now(), avatar: avatar ?? null };
+        cached = { at: Date.now(), avatar: avatar && AVATAR_TYPES.has(avatar.contentType) ? avatar : null };
+        // Regravar leva a chave para o fim do Map; ao passar do limite, saem as mais antigas.
+        avatars.delete(cacheKey);
         avatars.set(cacheKey, cached);
+        for (const oldest of avatars.keys()) {
+          if (avatars.size <= MAX_CACHED_AVATARS) break;
+          avatars.delete(oldest);
+        }
       }
-      if (!cached.avatar) return reply.status(404).send({ code: 'not-found', message: 'Sem foto' });
+      if (!cached.avatar) return reply.status(404).send({ code: 'not-found', message: say(request, 'noPhoto') });
       return reply
         .header('Content-Type', cached.avatar.contentType)
         .header('Cache-Control', 'private, max-age=21600')
-        .header('X-Content-Type-Options', 'nosniff')
+        .header('Content-Security-Policy', "default-src 'none'; sandbox")
         .send(cached.avatar.data);
     });
 
@@ -339,7 +431,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       async (request) =>
         getReleaseDetails(connection(request), {
           ...request.params,
-          branch: request.query.branch || undefined,
+          branch: text(request.query.branch, 250) || undefined,
           branching: config.branching,
         }),
     );
@@ -348,13 +440,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       '/projects/:projectId/repositories/:repositoryId/releases',
       async (request, reply) => {
         const { name, pullRequestIds } = request.body ?? {};
-        if (typeof name !== 'string' || !Array.isArray(pullRequestIds) || !pullRequestIds.every(Number.isInteger)) {
-          throw new ValidationError('Informe o nome da branch e os PRs');
+        if (typeof name !== 'string' || !Array.isArray(pullRequestIds) || pullRequestIds.length === 0 || !pullRequestIds.every(isPositiveInteger)) {
+          throw new ValidationError(msg('branchAndPrsRequired'));
+        }
+        if (pullRequestIds.length > MAX_RELEASE_PULL_REQUESTS) {
+          throw new ValidationError(msg('tooManyPullRequests', { max: MAX_RELEASE_PULL_REQUESTS }));
         }
         const created = await createRelease(connection(request), {
           ...request.params,
           name,
-          pullRequestIds: pullRequestIds as number[],
+          pullRequestIds,
           branching: config.branching,
         });
         return reply.status(201).send(created);
@@ -364,7 +459,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     api.get<{ Params: { projectId: string }; Querystring: { q?: string } }>(
       '/projects/:projectId/work-items',
       async (request) =>
-        searchWorkItems(connection(request), { projectId: request.params.projectId, term: request.query.q ?? '' }),
+        searchWorkItems(connection(request), { projectId: request.params.projectId, term: text(request.query.q, 200) }),
     );
 
     type LinkParams = RepoParams & { pullRequestId: string; workItemId: string };
@@ -394,7 +489,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     await app.register(fastifyStatic, { root: webDist });
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith('/api/') || request.url.startsWith('/auth/')) {
-        return reply.status(404).send({ code: 'not-found', message: 'Rota não encontrada' });
+        return reply.status(404).send({ code: 'not-found', message: say(request, 'routeNotFound') });
       }
       return reply.sendFile('index.html');
     });

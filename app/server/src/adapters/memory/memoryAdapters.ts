@@ -12,6 +12,7 @@ import type {
 import type { CreateReleaseBranchInput, SourceControl } from '../../core/ports/sourceControl.ts';
 import type { WorkTracking } from '../../core/ports/workTracking.ts';
 import type { MemoryWorkItem, World } from './world.ts';
+import { msg } from '../../i18n.ts';
 
 export interface MemoryFaults {
   // Simula o provedor fora do ar na listagem do board.
@@ -53,7 +54,7 @@ export class MemorySourceControl implements SourceControl {
 
   async listOpenPullRequests(projectId: string): Promise<PullRequest[]> {
     await this.delay();
-    if (this.faults.failSync) throw new ProviderUnavailableError('azure-devops', 'Azure DevOps não respondeu');
+    if (this.faults.failSync) throw new ProviderUnavailableError('azure-devops', msg('providerDown', { provider: 'Azure DevOps' }));
     return this.openOf(projectId);
   }
 
@@ -147,7 +148,7 @@ export class MemoryWorkTracking implements WorkTracking {
 
   private find(id: number): MemoryWorkItem {
     const item = this.world.workItems.find((w) => w.id === id);
-    if (!item) throw new NotFoundError(`Work item ${id} não encontrado`);
+    if (!item) throw new NotFoundError(msg('workItemNotFound', { id }));
     return item;
   }
 

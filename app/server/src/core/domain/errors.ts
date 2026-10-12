@@ -1,15 +1,30 @@
-export class NotAuthenticatedError extends Error {
-  constructor(message = 'Sessão expirada') {
+import { msg, render, type Locale, type Localized } from '../../i18n.ts';
+
+// A mensagem pode vir do provedor (texto livre) ou do catálogo, e então sai no idioma de quem pediu.
+export class LocalizedError extends Error {
+  readonly localized?: Localized;
+  constructor(message: string | Localized) {
+    super(typeof message === 'string' ? message : render(message));
+    if (typeof message !== 'string') this.localized = message;
+  }
+
+  messageIn(locale: Locale): string {
+    return this.localized ? render(this.localized, locale) : this.message;
+  }
+}
+
+export class NotAuthenticatedError extends LocalizedError {
+  constructor(message: string | Localized = msg('sessionExpired')) {
     super(message);
     this.name = 'NotAuthenticatedError';
   }
 }
 
 // O provedor não respondeu ou respondeu com erro: o board mostra o banner de sincronização.
-export class ProviderUnavailableError extends Error {
+export class ProviderUnavailableError extends LocalizedError {
   constructor(
     public readonly provider: string,
-    message: string,
+    message: string | Localized,
     public readonly status?: number,
   ) {
     super(message);
@@ -17,26 +32,33 @@ export class ProviderUnavailableError extends Error {
   }
 }
 
-export class CherryPickConflictError extends Error {
+export class CherryPickConflictError extends LocalizedError {
   constructor(
     public readonly pullRequestId: number,
     public readonly baseBranch: string,
   ) {
-    super(`Conflito ao aplicar #${pullRequestId} sobre ${baseBranch}`);
+    super(msg('cherryPickConflict', { id: pullRequestId, base: baseBranch }));
     this.name = 'CherryPickConflictError';
   }
 }
 
-export class ValidationError extends Error {
-  constructor(message: string) {
+export class ValidationError extends LocalizedError {
+  constructor(message: string | Localized) {
     super(message);
     this.name = 'ValidationError';
   }
 }
 
-export class NotFoundError extends Error {
-  constructor(message: string) {
+export class NotFoundError extends LocalizedError {
+  constructor(message: string | Localized) {
     super(message);
     this.name = 'NotFoundError';
+  }
+}
+
+export class RateLimitedError extends LocalizedError {
+  constructor(public readonly retryAfterSeconds: number) {
+    super(msg('tooManyRequests'));
+    this.name = 'RateLimitedError';
   }
 }

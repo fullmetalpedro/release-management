@@ -1,4 +1,4 @@
-import { constants, createHash, createPublicKey, publicEncrypt } from 'node:crypto';
+import { constants, createCipheriv, createHash, createPublicKey, publicEncrypt, randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -194,7 +194,7 @@ describe('servidor HTTP', () => {
     expect(board.statusCode).toBe(502);
     expect(board.json()).toMatchObject({ code: 'provider-unavailable', provider: 'azure-devops' });
 
-    await app.inject({ method: 'POST', url: '/auth/logout', headers: { cookie } });
+    await app.inject({ method: 'POST', url: '/auth/logout', headers: { cookie, 'x-requested-with': 'fetch' } });
     expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(401);
   });
 
@@ -253,12 +253,19 @@ describe('conexão por token pessoal', () => {
     registry.for = (session) =>
       session.activeSource ? { sourceControl: new MemorySourceControl(world), workTracking: new MemoryWorkTracking(world) } : real(session);
     const app = await buildServer({ config, sessions, registry, webDist: '/nao-existe', validatePat });
-    const { publicKey } = (await app.inject({ method: 'GET', url: '/auth/pat/key' })).json();
-    const encrypt = (plain: string) =>
-      publicEncrypt(
+    // O mesmo envelope que o navegador monta: chave AES embrulhada com RSA-OAEP | IV | { nonce, token } em AES-GCM.
+    const encrypt = async (plain: string, reuse?: { nonce: string }) => {
+      const { publicKey, nonce } = (await app.inject({ method: 'GET', url: '/auth/pat/key' })).json();
+      const key = randomBytes(32);
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', key, iv);
+      const sealed = Buffer.concat([cipher.update(JSON.stringify({ nonce: reuse?.nonce ?? nonce, token: plain })), cipher.final()]);
+      const wrapped = publicEncrypt(
         { key: createPublicKey({ key: Buffer.from(publicKey, 'base64'), format: 'der', type: 'spki' }), padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
-        Buffer.from(plain),
-      ).toString('base64');
+        key,
+      );
+      return Buffer.concat([wrapped, iv, sealed, cipher.getAuthTag()]).toString('base64');
+    };
     const connect = (provider: string, body: object, headers: Record<string, string> = {}) =>
       app.inject({ method: 'POST', url: `/auth/pat/${provider}`, headers: { 'x-requested-with': 'fetch', ...headers }, payload: body });
     const cookieOf = (response: { headers: Record<string, unknown> }) =>
@@ -286,7 +293,7 @@ describe('conexão por token pessoal', () => {
       return { owner: pedro };
     });
 
-    const encryptedToken = encrypt(token);
+    const encryptedToken = await encrypt(token);
     expect(encryptedToken).not.toContain(token);
     const response = await connect('azure-devops', { organization: 'muralisti', encryptedToken });
 
@@ -324,7 +331,7 @@ describe('conexão por token pessoal', () => {
     const { connect, encrypt } = await patServer(async () => {
       throw new NotAuthenticatedError();
     });
-    const response = await connect('github', { organization: 'muralis', encryptedToken: encrypt(token) });
+    const response = await connect('github', { organization: 'muralis', encryptedToken: await encrypt(token) });
     expect(response.statusCode).toBe(422);
     expect(response.json()).toMatchObject({ code: 'invalid-token', message: expect.stringContaining('GitHub') });
     expect(response.headers['set-cookie']).toBeUndefined();
@@ -332,7 +339,7 @@ describe('conexão por token pessoal', () => {
 
   it('barra conta malformada, token em claro, plataforma desconhecida e requisição de outro site', async () => {
     const { app, connect, encrypt } = await patServer();
-    const encryptedToken = encrypt(token);
+    const encryptedToken = await encrypt(token);
     expect((await connect('azure-devops', { organization: 'evil.com/x?', encryptedToken })).statusCode).toBe(400);
     expect((await connect('github', { organization: 'evil.com', encryptedToken })).statusCode).toBe(400);
     expect((await connect('jira', { site: 'evil.com', email: 'a@b.co', encryptedToken })).statusCode).toBe(400);
@@ -348,13 +355,13 @@ describe('conexão por token pessoal', () => {
       owner: provider === 'github' ? { id: 'gh1', name: 'pedro-gh', email: 'fullmetalpedro' } : provider === 'jira' ? { id: 'j1', name: 'Pedro Jira', email: 'pedro@muralis.com.br' } : pedro,
       cloudId: provider === 'jira' ? 'cloud-123' : undefined,
     }));
-    const first = await connect('azure-devops', { organization: 'muralisti', encryptedToken: encrypt(token) });
+    const first = await connect('azure-devops', { organization: 'muralisti', encryptedToken: await encrypt(token) });
     const cookie = cookieOf(first);
 
-    const github = await connect('github', { organization: 'muralis-gh', encryptedToken: encrypt(token) }, { cookie });
+    const github = await connect('github', { organization: 'muralis-gh', encryptedToken: await encrypt(token) }, { cookie });
     expect(github.statusCode).toBe(200);
     expect(github.headers['set-cookie']).toBeUndefined();
-    await connect('jira', { site: 'https://Muralis.atlassian.net/jira', email: 'pedro@muralis.com.br', encryptedToken: encrypt(token) }, { cookie });
+    await connect('jira', { site: 'https://Muralis.atlassian.net/jira', email: 'pedro@muralis.com.br', encryptedToken: await encrypt(token) }, { cookie });
 
     let profile = await me(cookie);
     expect(profile.accounts.map((a: { provider: string; connected: boolean; active?: boolean; account?: string }) => [a.provider, a.connected, a.active, a.account])).toEqual([
@@ -381,9 +388,9 @@ describe('conexão por token pessoal', () => {
 
   it('trocar o token de uma plataforma mantém a sessão e as outras conexões', async () => {
     const { connect, encrypt, cookieOf, me } = await patServer();
-    const cookie = cookieOf(await connect('azure-devops', { organization: 'muralisti', encryptedToken: encrypt(token) }));
-    await connect('github', { organization: 'muralis-gh', encryptedToken: encrypt(token) }, { cookie });
-    await connect('azure-devops', { organization: 'outra-org', encryptedToken: encrypt(token) }, { cookie });
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'muralisti', encryptedToken: await encrypt(token) }));
+    await connect('github', { organization: 'muralis-gh', encryptedToken: await encrypt(token) }, { cookie });
+    await connect('azure-devops', { organization: 'outra-org', encryptedToken: await encrypt(token) }, { cookie });
 
     const profile = await me(cookie);
     expect(profile.organization).toBe('outra-org');
@@ -392,7 +399,7 @@ describe('conexão por token pessoal', () => {
 
   it('só o Jira conectado não basta para abrir o board', async () => {
     const { app, connect, encrypt, cookieOf, me } = await patServer(async () => ({ owner: pedro, cloudId: 'c1' }));
-    const cookie = cookieOf(await connect('jira', { site: 'muralis.atlassian.net', email: 'pedro@muralis.com.br', encryptedToken: encrypt(token) }));
+    const cookie = cookieOf(await connect('jira', { site: 'muralis.atlassian.net', email: 'pedro@muralis.com.br', encryptedToken: await encrypt(token) }));
     expect(await me(cookie)).toMatchObject({ source: null, tracker: null });
     const projects = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
     expect(projects.statusCode).toBe(400);

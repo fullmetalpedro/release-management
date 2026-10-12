@@ -1,6 +1,7 @@
 import { Check, ChevronDown, FolderGit2, Minus } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { initials } from '../lib/format';
+import { t } from '../lib/i18n';
 
 export function cx(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(' ');
@@ -87,26 +88,38 @@ export function Checkbox({
   );
 }
 
-// Abre/fecha um menu ancorado; fecha com Esc ou clique fora.
+// Abre/fecha um menu ancorado; fecha com Esc, com clique fora ou quando o foco sai dele pelo teclado.
 export function useDropdown<T extends HTMLElement = HTMLDivElement>() {
   const [open, setOpen] = useState(false);
   const ref = useRef<T>(null);
+  // Conteúdo do menu renderizado fora do gatilho (portal): clicar nele não fecha o menu.
+  const portalRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
+    const inside = (target: EventTarget | null) =>
+      target instanceof Node && (!!ref.current?.contains(target) || !!portalRef.current?.contains(target));
     const onPointer = (event: PointerEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+      if (!inside(event.target)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key !== 'Escape') return;
+      // O item em foco some junto com o menu; o foco volta para o botão que o abriu, em vez de se perder.
+      if (inside(document.activeElement)) ref.current?.querySelector<HTMLElement>('button, [href], [tabindex]')?.focus();
+      setOpen(false);
+    };
+    const onFocus = (event: FocusEvent) => {
+      if (!inside(event.target)) setOpen(false);
     };
     document.addEventListener('pointerdown', onPointer);
     document.addEventListener('keydown', onKey);
+    document.addEventListener('focusin', onFocus);
     return () => {
       document.removeEventListener('pointerdown', onPointer);
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocus);
     };
   }, [open]);
-  return { open, setOpen, ref };
+  return { open, setOpen, ref, portalRef };
 }
 
 export function LightMenu({
@@ -203,7 +216,7 @@ export function RepoSelect({
       >
         <FolderGit2 size={14} className={tone === 'violet' ? 'text-[#7C3AED]' : 'text-[#0F766E]'} />
         <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] font-medium text-ink">
-          {current?.name ?? 'Selecione um repositório'}
+          {current?.name ?? t('lanes.selectRepository')}
         </span>
         <ChevronDown size={14} className={cx('text-faint transition-transform', open && 'rotate-180')} />
       </button>

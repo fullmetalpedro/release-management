@@ -13,6 +13,7 @@ import {
   type LanePullRequest,
   type ReleaseView,
 } from './releaseLane.ts';
+import { msg } from '../../i18n.ts';
 
 export interface ReleaseRow {
   task: WorkItemSummary | null;
@@ -106,7 +107,7 @@ export async function getReleaseDetails(
   const index = input.branch ? branches.findIndex((b) => b.name === input.branch) : 0;
   const branch = branches[index];
   if (!branch) {
-    if (input.branch) throw new NotFoundError(`A branch ${input.branch} não existe`);
+    if (input.branch) throw new NotFoundError(msg('branchNotFound', { branch: input.branch }));
     return {
       syncedAt,
       repository: repositoryView,

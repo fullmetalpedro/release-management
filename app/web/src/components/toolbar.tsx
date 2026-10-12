@@ -14,9 +14,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { ProjectView } from '../lib/api';
-import { plural } from '../lib/format';
 import { COLUMNS, type ColumnId } from './board';
 import { Avatar, Checkbox, cx, Dot, LightMenu, MenuOption, useDropdown } from './ui';
+import { t } from '../lib/i18n';
 
 export function ProjectSwitcher({
   projects,
@@ -40,16 +40,16 @@ export function ProjectSwitcher({
         className={cx('hover-dark flex items-center gap-2 rounded-lg bg-[#2A2D33] py-[7px] pl-3 pr-2.5', open && 'stroke-focus')}
       >
         <span className="text-sm font-semibold text-white">
-          {current?.name ?? (loading ? 'Carregando…' : 'Sem projetos')}
+          {current?.name ?? (loading ? t('common.loading') : t('board.noProjects'))}
         </span>
         {open ? <ChevronsDownUp size={14} className="text-[#A1A7B0]" /> : <ChevronsUpDown size={14} className="text-[#A1A7B0]" />}
       </button>
       {open && (
         <div
           role="menu"
-          className="pop-in absolute left-0 top-full z-30 mt-[11px] flex w-[248px] flex-col gap-0.5 rounded-[10px] bg-[#2A2D33] p-1.5 shadow-[0_10px_28px_#0F172A40]"
+          className="pop-in absolute left-0 top-full z-30 mt-[11px] flex max-h-[min(420px,60vh)] w-[248px] flex-col gap-0.5 overflow-y-auto rounded-[10px] bg-[#2A2D33] p-1.5 shadow-[0_10px_28px_#0F172A40]"
         >
-          <div className="px-2.5 pb-1.5 pt-2 text-[11px] font-semibold tracking-[0.6px] text-[#8B919A]">PROJETOS</div>
+          <div className="px-2.5 pb-1.5 pt-2 text-[11px] font-semibold tracking-[0.6px] text-[#8B919A]">{t('board.projects')}</div>
           {projects.map((project) => {
             const selected = project.id === current?.id;
             return (
@@ -70,7 +70,7 @@ export function ProjectSwitcher({
                 <span className={cx('min-w-0 flex-1 truncate text-[13px]', selected ? 'font-semibold text-white' : 'font-medium text-[#D1D5DB]')}>
                   {project.name}
                 </span>
-                <span className="text-xs text-[#8B919A]">{plural(project.openPullRequests, 'PR', 'PRs')}</span>
+                <span className="text-xs text-[#8B919A]">{t('common.prCount', { count: project.openPullRequests })}</span>
                 {selected && <Check size={14} className="text-white" />}
               </button>
             );
@@ -189,14 +189,14 @@ export function ColumnsDropdown({
         className={cx('stroke hover-surface flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-[7px]', open && 'stroke-focus')}
       >
         <Columns3 size={14} className="text-ink-2" />
-        <span className="text-[13px] font-medium text-ink">Colunas</span>
+        <span className="text-[13px] font-medium text-ink">{t('board.columns')}</span>
         <span className="rounded-lg bg-[#F1F5F9] px-1.5 py-px text-[11.5px] font-semibold text-ink-2">
           {visible}/{COLUMNS.length}
         </span>
         <ChevronDown size={14} className={cx('text-faint transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
-        <LightMenu title="COLUNAS VISÍVEIS">
+        <LightMenu title={t('board.visibleColumns')}>
           {COLUMNS.map((column) => {
             const shown = !hidden.includes(column.id);
             return (
@@ -225,10 +225,10 @@ export function ColumnsDropdown({
               onClick={() => onChange([])}
               className="text-[12.5px] font-semibold text-[#0F766E] disabled:text-faint"
             >
-              Mostrar todas
+              {t('board.showAll')}
             </button>
             <span className="text-xs text-faint">
-              {hidden.length === 0 ? 'Nenhuma oculta' : plural(hidden.length, 'oculta', 'ocultas')}
+              {hidden.length === 0 ? t('board.noneHidden') : t('board.hidden', { count: hidden.length })}
             </span>
           </div>
         </LightMenu>
@@ -245,8 +245,8 @@ export function SearchBox({ value, onChange }: { value: string; onChange: (value
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="Buscar título, #id, autor"
-        aria-label="Buscar título, #id, autor"
+        placeholder={t('board.search')}
+        aria-label={t('board.search')}
         className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-faint"
       />
     </label>
@@ -265,7 +265,7 @@ export function SyncControls({
   onRefresh: () => void;
 }) {
   // Durante a sincronização só o botão muda; o status continua mostrando o último resultado.
-  const status = failed ? 'Falha ao sincronizar' : lastSync ? `Sincronizado ${lastSync}` : '';
+  const status = failed ? t('common.syncFailed') : lastSync ? t('common.synced', { when: lastSync }) : '';
   return (
     <>
       <button
@@ -273,20 +273,23 @@ export function SyncControls({
         onClick={onRefresh}
         disabled={syncing}
         className={cx(
-          'flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2',
+          'grid shrink-0 rounded-lg px-3.5 py-2 text-[13px] font-semibold text-white',
           syncing ? 'bg-ink-2' : 'hover-primary bg-ink',
         )}
       >
-        {syncing ? (
-          <LoaderCircle size={14} className="animate-spin text-white" />
-        ) : (
-          <RefreshCw size={14} className="text-white" />
-        )}
-        <span className="text-[13px] font-semibold text-white">{syncing ? 'Sincronizando' : 'Atualizar'}</span>
+        {/* Os dois rótulos ocupam o mesmo lugar: o botão não muda de largura a cada sincronização. */}
+        <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-1.5', syncing && 'invisible')}>
+          <RefreshCw size={14} />
+          {t('common.refresh')}
+        </span>
+        <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-1.5', !syncing && 'invisible')}>
+          <LoaderCircle size={14} className={cx(syncing && 'animate-spin')} />
+          {t('common.syncing')}
+        </span>
       </button>
       <span
         className={cx('whitespace-nowrap text-xs', failed ? 'text-[#DC2626]' : 'text-faint')}
-        title={failed && lastSync ? `Última sincronização ${lastSync}` : undefined}
+        title={failed && lastSync ? t('common.lastSync', { when: lastSync }) : undefined}
         aria-live="polite"
       >
         {status}

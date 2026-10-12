@@ -2,9 +2,10 @@ import { GitBranch, GitBranchPlus, GitMerge, LoaderCircle, Maximize2 } from 'luc
 import { useEffect, useState } from 'react';
 import { useViewNavigate } from '../lib/transition';
 import type { LanePullRequest, ReleaseLane } from '../lib/api';
-import { authorLabel, plural, releaseMeta, shortDate } from '../lib/format';
+import { authorLabel, releaseMeta, shortDate } from '../lib/format';
 import { ColumnShell, QuietNote } from './board';
 import { Checkbox, cx, RepoSelect, SkeletonCard } from './ui';
+import { t } from '../lib/i18n';
 
 interface Repo {
   id: string;
@@ -18,7 +19,7 @@ function PrMeta({ pr }: { pr: LanePullRequest }) {
       <span className="text-xs text-[#CBD5E1]">·</span>
       <span className="truncate text-xs text-mute">{authorLabel(pr.author)}</span>
       <span className="text-xs text-[#CBD5E1]">·</span>
-      <span className="text-xs text-mute">{shortDate(pr.mergedAt)}</span>
+      <span className="shrink-0 whitespace-nowrap text-xs text-mute">{shortDate(pr.mergedAt)}</span>
     </div>
   );
 }
@@ -36,6 +37,7 @@ export function MergedColumn({
   onRepositoryChange,
   lane,
   loading,
+  failed,
   state,
   onCreate,
   onSelectionChange,
@@ -45,6 +47,8 @@ export function MergedColumn({
   onRepositoryChange: (id: string) => void;
   lane: ReleaseLane | undefined;
   loading: boolean;
+  // A raia deste repositório não carregou: não dá para afirmar que não há PRs.
+  failed: boolean;
   state: CreateState;
   onCreate: (name: string, pullRequestIds: number[]) => void;
   onSelectionChange: () => void;
@@ -84,19 +88,17 @@ export function MergedColumn({
     <div className="stroke flex flex-col gap-2.5 rounded-lg bg-white p-3.5 [--stroke:#99F6E4]">
       <div className="flex items-center justify-between">
         <span className={cx('text-[13px] font-semibold', selected.length > 0 ? 'text-ink' : 'text-mute')}>
-          {selected.length === 0
-            ? 'Nenhum PR selecionado'
-            : `${plural(selected.length, 'PR', 'PRs')} ${selected.length === 1 ? 'selecionado' : 'selecionados'}`}
+          {selected.length === 0 ? t('lanes.noneSelected') : t('lanes.selected', { count: selected.length })}
         </span>
         {selected.length > 0 && !creating && (
           <button type="button" onClick={() => update([])} className="text-[12.5px] font-medium text-[#0F766E] hover:underline">
-            Limpar
+            {t('lanes.clear')}
           </button>
         )}
       </div>
       <div className="flex flex-col gap-1.5">
         <label htmlFor="release-branch" className="text-xs font-medium text-ink-2">
-          Nova branch
+          {t('lanes.newBranch')}
         </label>
         <div
           className={cx(
@@ -115,7 +117,7 @@ export function MergedColumn({
           />
         </div>
         <p className="text-[11.5px] leading-[1.4] text-faint">
-          A partir de {lane?.baseBranch ?? 'main'}, com cherry-pick dos PRs selecionados
+          {t('lanes.fromBase', { base: lane?.baseBranch ?? 'main' })}
         </p>
       </div>
       <button
@@ -123,7 +125,7 @@ export function MergedColumn({
         disabled={!canCreate}
         onClick={() => onCreate(branch.trim(), selected)}
         className={cx(
-          'flex items-center justify-center gap-2 rounded-lg px-3.5 py-[9px] text-[13px] font-semibold',
+          'grid rounded-lg px-3.5 py-[9px] text-[13px] font-semibold',
           creating
             ? 'bg-ink-2 text-[#CBD5E1]'
             : canCreate
@@ -131,8 +133,15 @@ export function MergedColumn({
               : 'bg-[#E2E8F0] text-faint',
         )}
       >
-        {creating ? <LoaderCircle size={14} className="animate-spin" /> : <GitBranchPlus size={14} />}
-        {creating ? 'Criando branch…' : 'Criar branch de release'}
+        {/* Os dois rótulos ocupam o mesmo lugar: o botão fica do tamanho do maior e a coluna não muda de altura. */}
+        <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-2', creating && 'invisible')}>
+          <GitBranchPlus size={14} className="shrink-0" />
+          {t('lanes.create')}
+        </span>
+        <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-2', !creating && 'invisible')}>
+          <LoaderCircle size={14} className="shrink-0 animate-spin" />
+          {t('lanes.creating')}
+        </span>
       </button>
     </div>
   );
@@ -158,12 +167,12 @@ export function MergedColumn({
       <div className={cx('stroke flex flex-col overflow-hidden rounded-lg bg-white', creating && 'opacity-55')}>
         <div className="flex items-center gap-2.5 border-b border-line-row bg-soft px-3.5 py-2.5">
           <Checkbox
-            label="Selecionar todos"
+            label={t('lanes.selectAll')}
             state={allSelected ? 'on' : selected.length > 0 ? 'partial' : 'off'}
             disabled={creating || merged.length === 0}
             onChange={() => update(allSelected ? [] : merged.map((pr) => pr.id))}
           />
-          <span className="text-[12.5px] font-medium text-ink-2">Selecionar todos</span>
+          <span className="text-[12.5px] font-medium text-ink-2">{t('lanes.selectAll')}</span>
         </div>
         {merged.map((pr, index) => {
           const isSelected = selected.includes(pr.id);
@@ -186,7 +195,7 @@ export function MergedColumn({
             >
               <span className="pt-px">
                 <Checkbox
-                  label={`Selecionar PR #${pr.id}`}
+                  label={t('lanes.selectPr', { id: pr.id })}
                   state={isSelected ? 'on' : 'off'}
                   disabled={creating}
                   onChange={() => toggle(pr.id)}
@@ -200,7 +209,9 @@ export function MergedColumn({
           );
         })}
         {merged.length === 0 && repositoryId && (
-          <p className="px-3.5 py-3 text-xs text-faint">Nenhum PR mergeado fora de release neste repositório.</p>
+          <p className={cx('px-3.5 py-3 text-xs', failed ? 'text-[#DC2626]' : 'text-mute')}>
+            {failed ? t('lanes.loadFailed') : t('lanes.noMerged')}
+          </p>
         )}
       </div>
     </ColumnShell>
@@ -213,6 +224,7 @@ export function ReleaseColumn({
   onRepositoryChange,
   lane,
   loading,
+  failed,
   highlight,
   now,
 }: {
@@ -221,6 +233,7 @@ export function ReleaseColumn({
   onRepositoryChange: (id: string) => void;
   lane: ReleaseLane | undefined;
   loading: boolean;
+  failed: boolean;
   highlight: boolean;
   now: number;
 }) {
@@ -235,8 +248,8 @@ export function ReleaseColumn({
         event.preventDefault();
         viewNavigate(releaseUrl);
       }}
-      aria-label="Abrir release em tela cheia"
-      title="Abrir release em tela cheia"
+      aria-label={t('lanes.openFullscreen')}
+      title={t('lanes.openFullscreen')}
       className="stroke flex h-[26px] w-[26px] items-center justify-center rounded-md bg-white [--stroke:#DDD6FE] hover:bg-[#EDE9FE] hover:[--stroke:#C4B5FD]"
     >
       <Maximize2 size={13} className="text-[#7C3AED]" />
@@ -266,7 +279,7 @@ export function ReleaseColumn({
                 <span className="truncate font-mono text-sm font-semibold text-ink">{release.name}</span>
               </div>
               <span className="shrink-0 rounded bg-[#EDE9FE] px-[7px] py-0.5 text-[11px] font-semibold text-[#6D28D9]">
-                Última
+                {t('common.latest')}
               </span>
             </div>
             <p className="text-xs leading-[1.4] text-mute">{releaseMeta(release, now)}</p>
@@ -287,11 +300,16 @@ export function ReleaseColumn({
               ))}
             </div>
           ) : (
-            <QuietNote>Nenhum PR identificado nesta release.</QuietNote>
+            <QuietNote>{t('lanes.noPrsInRelease')}</QuietNote>
           )}
         </>
       ) : (
-        repositoryId && <QuietNote>Este repositório ainda não tem branch de release.</QuietNote>
+        repositoryId &&
+        (failed ? (
+          <p className="px-1.5 pb-1 text-xs text-[#DC2626]">{t('lanes.loadFailed')}</p>
+        ) : (
+          <QuietNote>{t('lanes.noReleaseBranch')}</QuietNote>
+        ))
       )}
     </ColumnShell>
   );

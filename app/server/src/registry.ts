@@ -11,6 +11,7 @@ import { NotAuthenticatedError, ValidationError } from './core/domain/errors.ts'
 import type { IdentityProvider, TokenSet } from './core/ports/identityProvider.ts';
 import type { SourceControl } from './core/ports/sourceControl.ts';
 import type { WorkTracking } from './core/ports/workTracking.ts';
+import { msg } from './i18n.ts';
 
 export interface Connection {
   sourceControl: SourceControl;
@@ -89,7 +90,7 @@ export class ConnectionRegistry {
             : new NoWorkTracking(),
       };
     }
-    throw new ValidationError('Conecte o Azure DevOps ou o GitHub para ver os PRs.');
+    throw new ValidationError(msg('connectSource'));
   }
 
   private azureDevOps(organization: string, authorization: () => Promise<string>): Connection {

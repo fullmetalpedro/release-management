@@ -45,15 +45,27 @@ A tela de entrada tem um seletor entre **Conta Microsoft** e **Token pessoal**, 
 
 O token pessoal nunca fica em claro fora da memória do processo no instante do uso:
 
-- **No envio:** o navegador cifra com RSA-OAEP usando uma chave pública que o servidor gera a cada inicialização.
+- **No envio:** o navegador cifra o token com uma chave AES-GCM descartável e embrulha essa chave com RSA-OAEP, usando a chave pública que o servidor gera a cada inicialização. Cada envio leva um nonce de uso único, então um envio capturado não pode ser repetido.
 - **No servidor:** é validado na plataforma e guardado selado com AES-256-GCM, tanto na sessão em memória quanto no arquivo `.data/sessions.enc`.
 - **No navegador:** só existe o cookie de sessão (HttpOnly), que não contém o token.
 
 As conexões se somam na mesma sessão. Para abrir o board é preciso o Azure DevOps ou o GitHub; com os dois conectados, o menu de contas escolhe de qual vêm os PRs. Com o GitHub ativo e sem Jira, o board e as releases funcionam, mas não há tasks para vincular.
 
-Sem `SESSION_SECRET` as sessões não são gravadas em disco e caem a cada restart. Em produção use HTTPS de qualquer forma: a cifra do envio protege o token, não o cookie de sessão.
+Sem `SESSION_SECRET` as sessões não são gravadas em disco e caem a cada restart. Em produção use HTTPS de qualquer forma: a cifra do envio é uma camada a mais (o token não aparece em logs de proxy nem no corpo da requisição), mas não protege o cookie de sessão nem resiste a quem altera o tráfego.
+
+O servidor também:
+
+- manda cabeçalhos de segurança em toda resposta (Content-Security-Policy, `X-Frame-Options`, `nosniff`, `Referrer-Policy` e, com HTTPS, HSTS);
+- limita as tentativas de entrada a 60 por minuto por IP. Atrás de um proxy reverso, defina `TRUST_PROXY=true`, senão todos os usuários contam como o IP do proxy;
+- recusa ids de projeto e repositório que não tenham forma de id, e codifica todos antes de montar o endereço do provedor.
 
 Para ver a interface com dados fictícios, sem provedor nenhum, suba com `AUTH_MODE=demo`.
+
+## Idiomas
+
+A interface fala português, inglês e francês e segue o idioma do navegador (o primeiro da lista de preferências que ela conhece; nenhum, inglês). Não há seletor. Os textos ficam em `web/src/locales`, com `pt.ts` como origem: os outros catálogos precisam ter as mesmas chaves, e o TypeScript acusa se faltar alguma. As mensagens de erro da API saem no mesmo idioma, pelo `Accept-Language` que o front envia (`server/src/i18n.ts`).
+
+Os termos seguem a interface de cada plataforma: em francês, "jeton d'accès personnel" e "élément de travail" como no Azure DevOps e "ticket" como no Jira; em inglês, "work item" também para o Jira. O GitHub só tem interface em inglês, então o guia de token em francês cita os botões em inglês.
 
 ## Como a release é montada
 

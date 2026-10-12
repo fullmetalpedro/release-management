@@ -1,4 +1,5 @@
 import { NotAuthenticatedError, ProviderUnavailableError } from '../../core/domain/errors.ts';
+import { msg, type Localized } from '../../i18n.ts';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -12,10 +13,19 @@ export interface RequestOptions {
 }
 
 export class AzureDevOpsHttpError extends ProviderUnavailableError {
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string | Localized) {
     super('azure-devops', message, status);
     this.name = 'AzureDevOpsHttpError';
   }
+}
+
+// Respostas que valem uma nova tentativa numa leitura: limite de requisições e falha passageira do provedor.
+export const isTransientStatus = (status: number | undefined) => status === 429 || status === 502 || status === 503 || status === 504;
+
+// Quanto esperar antes de repetir: o que o provedor pedir em Retry-After (até 5 s) ou um recuo crescente.
+export function retryDelay(response: Response | undefined, attempt: number, baseMs: number): number {
+  const asked = Number(response?.headers.get('retry-after'));
+  return Number.isFinite(asked) && asked > 0 ? Math.min(asked * 1000, 5_000) : baseMs * attempt;
 }
 
 export const bearer = (token: string) => `Bearer ${token}`;
@@ -60,13 +70,13 @@ export class AzureDevOpsClient {
         });
       } catch (error) {
         if (attempt > this.readRetries) {
-          throw new ProviderUnavailableError('azure-devops', `Azure DevOps não respondeu: ${(error as Error).message}`);
+          throw new ProviderUnavailableError('azure-devops', msg('providerDownDetail', { provider: 'Azure DevOps', detail: (error as Error).message }));
         }
         await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs * attempt));
       }
     }
     if (response.status === 401 || (response.status >= 300 && response.status < 400)) {
-      throw new NotAuthenticatedError('O Azure DevOps recusou o token da sessão');
+      throw new NotAuthenticatedError(msg('sessionTokenRejected', { provider: 'Azure DevOps' }));
     }
     const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
     if (!response.ok || !contentType.startsWith('image/')) return undefined;
@@ -99,25 +109,27 @@ export class AzureDevOpsClient {
     // Leituras são repetidas em queda de conexão; escritas não, para não aplicar duas vezes.
     const attempts = method === 'GET' || options.readOnly ? 1 + this.readRetries : 1;
     for (let attempt = 1; !response; attempt++) {
+      let received: Response | undefined;
       try {
-        response = await send();
+        received = await send();
       } catch (error) {
         if (attempt >= attempts) {
-          throw new ProviderUnavailableError('azure-devops', `Azure DevOps não respondeu: ${(error as Error).message}`);
+          throw new ProviderUnavailableError('azure-devops', msg('providerDownDetail', { provider: 'Azure DevOps', detail: (error as Error).message }));
         }
-        await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs * attempt));
       }
+      if (received && (attempt >= attempts || !isTransientStatus(received.status))) response = received;
+      else await new Promise((resolve) => setTimeout(resolve, retryDelay(received, attempt, this.retryDelayMs)));
     }
 
     const isJson = (response.headers.get('content-type') ?? '').includes('json');
     const redirected = response.status >= 300 && response.status < 400;
     // Token recusado: 401, redirect para o login ou a própria página de login em HTML.
     if (response.status === 401 || redirected || (response.ok && response.status !== 204 && !isJson)) {
-      throw new NotAuthenticatedError('O Azure DevOps recusou o token da sessão');
+      throw new NotAuthenticatedError(msg('sessionTokenRejected', { provider: 'Azure DevOps' }));
     }
     if (!response.ok) {
       const detail = isJson ? ((await response.json().catch(() => ({}))) as { message?: string }).message : undefined;
-      throw new AzureDevOpsHttpError(response.status, detail ?? `Azure DevOps respondeu ${response.status}`);
+      throw new AzureDevOpsHttpError(response.status, detail ?? msg('providerStatus', { provider: 'Azure DevOps', status: response.status }));
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
