@@ -43,11 +43,11 @@ function fake(routes: Record<string, Handler>) {
   return { fetchImpl, calls };
 }
 
-const repository = { id: 'api', name: 'api', projectId: 'muralis' };
+const repository = { id: 'api', name: 'api', projectId: 'acme' };
 const github = (routes: Record<string, Handler>) => {
   const { fetchImpl, calls } = fake(routes);
   const sourceControl = new GitHubSourceControl(
-    { owner: 'muralis', releasePattern: DEFAULT_RELEASE_PATTERN, developBranch: 'develop' },
+    { owner: 'acme', releasePattern: DEFAULT_RELEASE_PATTERN, developBranch: 'develop' },
     async () => 'ghp-token',
     fetchImpl,
     1,
@@ -60,7 +60,7 @@ describe('GitHub · pull requests', () => {
   const node = (overrides: object) => ({
     number: 12,
     title: 'feat: exportar relatório',
-    url: 'https://github.com/muralis/api/pull/12',
+    url: 'https://github.com/acme/api/pull/12',
     isDraft: false,
     createdAt: '2026-10-10T12:00:00Z',
     mergeable: 'MERGEABLE',
@@ -68,7 +68,7 @@ describe('GitHub · pull requests', () => {
     headRefName: 'feature/PROJ-7-exportar',
     totalCommentsCount: 4,
     reviewDecision: null,
-    author: actor('manoel', 2, 'Manoel Martins'),
+    author: actor('sam', 2, 'Sam Carter'),
     repository: { name: 'api' },
     reviewRequests: { nodes: [] },
     latestOpinionatedReviews: { nodes: [] },
@@ -78,7 +78,7 @@ describe('GitHub · pull requests', () => {
   it('extrai o PR da mensagem de merge e de squash, e ignora o resto', () => {
     expect(
       pullRequestIdsFromMessages([
-        'Merge pull request #12 from muralis/feature\n\nfeat: x',
+        'Merge pull request #12 from acme/feature\n\nfeat: x',
         'fix: arredondamento (#15)',
         'fix: arredondamento (#15)',
         'chore: menciona #99 no meio do texto',
@@ -93,11 +93,11 @@ describe('GitHub · pull requests', () => {
       latestOpinionatedReviews: {
         nodes: [
           { state: 'APPROVED', author: actor('ana', 3, 'Ana') },
-          { state: 'CHANGES_REQUESTED', author: actor('bruno', 4, 'Bruno') },
-          { state: 'APPROVED', author: actor('pedro', 1, 'Pedro') },
+          { state: 'CHANGES_REQUESTED', author: actor('ben', 4, 'Ben') },
+          { state: 'APPROVED', author: actor('alex', 1, 'Alex') },
         ],
       },
-      reviewRequests: { nodes: [{ requestedReviewer: actor('pedro', 1, 'Pedro') }, { requestedReviewer: {} }, { requestedReviewer: null }] },
+      reviewRequests: { nodes: [{ requestedReviewer: actor('alex', 1, 'Alex') }, { requestedReviewer: {} }, { requestedReviewer: null }] },
     });
     expect(reviews.map((r) => [r.reviewer.id, r.decision])).toEqual([
       ['3', 'approved'],
@@ -113,13 +113,13 @@ describe('GitHub · pull requests', () => {
           search: {
             pageInfo: { hasNextPage: false, endCursor: null },
             nodes: [
-              node({ reviewRequests: { nodes: [{ requestedReviewer: actor('pedro', 1, 'Pedro Carlo') }] } }),
+              node({ reviewRequests: { nodes: [{ requestedReviewer: actor('alex', 1, 'Alex Rivera') }] } }),
               node({ number: 13, mergeable: 'CONFLICTING', author: null, totalCommentsCount: null }),
               node({
                 number: 14,
                 reviewDecision: 'APPROVED',
                 latestOpinionatedReviews: { nodes: [{ state: 'APPROVED', author: actor('ana', 3, 'Ana') }] },
-                reviewRequests: { nodes: [{ requestedReviewer: actor('pedro', 1, 'Pedro Carlo') }] },
+                reviewRequests: { nodes: [{ requestedReviewer: actor('alex', 1, 'Alex Rivera') }] },
               }),
               {},
             ],
@@ -127,22 +127,22 @@ describe('GitHub · pull requests', () => {
         },
       }),
     });
-    const pulls = await sourceControl.listOpenPullRequests('muralis');
-    const me = { id: '1', name: 'Pedro Carlo' };
+    const pulls = await sourceControl.listOpenPullRequests('acme');
+    const me = { id: '1', name: 'Alex Rivera' };
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.body.variables.q).toBe('is:pr is:open archived:false user:muralis');
+    expect(calls[0]!.body.variables.q).toBe('is:pr is:open archived:false user:acme');
     expect(calls[0]!.headers.Authorization).toBe('Bearer ghp-token');
     expect(pulls[0]).toMatchObject({
       provider: 'github',
       id: 12,
-      repository: { id: 'api', name: 'api', projectId: 'muralis' },
+      repository: { id: 'api', name: 'api', projectId: 'acme' },
       sourceBranch: 'feature/PROJ-7-exportar',
       targetBranch: 'develop',
-      author: { id: '2', name: 'Manoel Martins', avatarKey: '2' },
+      author: { id: '2', name: 'Sam Carter', avatarKey: '2' },
       mergeState: 'clean',
       commentCount: 4,
-      webUrl: 'https://github.com/muralis/api/pull/12',
+      webUrl: 'https://github.com/acme/api/pull/12',
     });
     expect(classify(pulls[0]!, me)).toEqual({ column: 'dependsOnMe', reason: 'reviewer' });
     // Autor apagado vira "ghost"; conflito sem contagem conta como um.
@@ -159,51 +159,51 @@ describe('GitHub · pull requests', () => {
         data: { search: { pageInfo: { hasNextPage: ++page < 3, endCursor: `c${page}` }, nodes: [node({ number: page })] } },
       }),
     });
-    expect((await sourceControl.listOpenPullRequests('muralis')).map((p) => p.id)).toEqual([1, 2, 3]);
+    expect((await sourceControl.listOpenPullRequests('acme')).map((p) => p.id)).toEqual([1, 2, 3]);
     expect(calls.map((c) => c.body.variables.cursor)).toEqual([null, 'c1', 'c2']);
   });
 
   it('token recusado e erro do GraphQL viram os erros do núcleo', async () => {
     const denied = github({ 'POST /graphql': () => new Response('{}', { status: 401 }) });
-    await expect(denied.sourceControl.countOpenPullRequests('muralis')).rejects.toBeInstanceOf(NotAuthenticatedError);
+    await expect(denied.sourceControl.countOpenPullRequests('acme')).rejects.toBeInstanceOf(NotAuthenticatedError);
     const broken = github({ 'POST /graphql': () => ({ errors: [{ message: 'Field x does not exist' }] }) });
-    await expect(broken.sourceControl.countOpenPullRequests('muralis')).rejects.toThrow('Field x does not exist');
+    await expect(broken.sourceControl.countOpenPullRequests('acme')).rejects.toThrow('Field x does not exist');
   });
 
   it('lista repositórios da organização e, se o dono for um usuário, os dele', async () => {
     const org = github({
-      'GET /orgs/muralis/repos': () => [
-        { name: 'api', owner: { login: 'muralis' } },
-        { name: 'legado', archived: true, owner: { login: 'muralis' } },
+      'GET /orgs/acme/repos': () => [
+        { name: 'api', owner: { login: 'acme' } },
+        { name: 'legado', archived: true, owner: { login: 'acme' } },
       ],
     });
-    expect(await org.sourceControl.listRepositories('muralis')).toEqual([{ id: 'api', name: 'api', projectId: 'muralis' }]);
+    expect(await org.sourceControl.listRepositories('acme')).toEqual([{ id: 'api', name: 'api', projectId: 'acme' }]);
 
     const user = github({
       'GET /user/repos': () => [
-        { name: 'dotfiles', owner: { login: 'Pedro' } },
+        { name: 'dotfiles', owner: { login: 'Alex' } },
         { name: 'outra', owner: { login: 'alguem' } },
       ],
     });
-    expect((await user.sourceControl.listRepositories('pedro')).map((r) => r.name)).toEqual(['dotfiles']);
+    expect((await user.sourceControl.listRepositories('alex')).map((r) => r.name)).toEqual(['dotfiles']);
   });
 
   it('mergeados: só os PRs fechados com merge, com a data do merge', async () => {
     const pull = (number: number, merged_at: string | null) => ({
       number,
       title: `pr ${number}`,
-      html_url: `https://github.com/muralis/api/pull/${number}`,
+      html_url: `https://github.com/acme/api/pull/${number}`,
       created_at: '2026-10-01T00:00:00Z',
       merged_at,
       merge_commit_sha: 'sha',
-      user: { id: 2, login: 'manoel' },
+      user: { id: 2, login: 'sam' },
       base: { ref: 'develop' },
       head: { ref: 'f' },
     });
-    const { sourceControl, calls } = github({ 'GET /repos/muralis/api/pulls': () => [pull(20, '2026-10-09T10:00:00Z'), pull(21, null)] });
+    const { sourceControl, calls } = github({ 'GET /repos/acme/api/pulls': () => [pull(20, '2026-10-09T10:00:00Z'), pull(21, null)] });
     const merged = await sourceControl.listMergedPullRequests(repository, 'develop');
 
-    expect(merged.map((p) => [p.id, p.status, p.closedAt, p.author.name])).toEqual([[20, 'merged', '2026-10-09T10:00:00Z', 'manoel']]);
+    expect(merged.map((p) => [p.id, p.status, p.closedAt, p.author.name])).toEqual([[20, 'merged', '2026-10-09T10:00:00Z', 'sam']]);
     expect(Object.fromEntries(calls[0]!.query)).toMatchObject({ state: 'closed', base: 'develop' });
   });
 
@@ -214,7 +214,7 @@ describe('GitHub · pull requests', () => {
       'GET /compare/develop...release/2.15': () => ({ ahead_by: 0 }),
       'GET /compare/develop...release/2.9': () => ({ ahead_by: 4 }),
       'GET /compare/main...release/2.15': () => ({
-        commits: [{ commit: { message: 'Merge pull request #12 from muralis/x' } }, { commit: { message: 'fix: y (#15)' } }],
+        commits: [{ commit: { message: 'Merge pull request #12 from acme/x' } }, { commit: { message: 'fix: y (#15)' } }],
       }),
     });
     const branches = await sourceControl.listReleaseBranches(repository);
@@ -223,7 +223,7 @@ describe('GitHub · pull requests', () => {
       ['release/2.15', 'develop', undefined],
       ['release/2.9', undefined, undefined],
     ]);
-    expect(branches[0]!.webUrl).toBe('https://github.com/muralis/api/tree/release/2.15');
+    expect(branches[0]!.webUrl).toBe('https://github.com/acme/api/tree/release/2.15');
     expect(await sourceControl.listPullRequestIdsInBranch(repository, 'release/2.15', 'main')).toEqual([12, 15]);
     expect(await sourceControl.listPullRequestIdsInBranch(repository, 'release/2.15', 'nao-existe')).toEqual([]);
     expect(calls.some((c) => c.path.endsWith('/compare/main...release/2.15'))).toBe(true);
@@ -240,7 +240,7 @@ describe('GitHub · criação da branch de release', () => {
   function gitFake(conflictOn?: number) {
     const commits = new Map<string, { tree: string; parents: string[]; message: string }>([
       ['main0', { tree: 't-main', parents: [], message: 'base' }],
-      ['m12', { tree: 't-12', parents: ['d0', 'f12'], message: 'Merge pull request #12 from muralis/a\n\nfeat: a' }],
+      ['m12', { tree: 't-12', parents: ['d0', 'f12'], message: 'Merge pull request #12 from acme/a\n\nfeat: a' }],
       ['s15', { tree: 't-15', parents: ['d1'], message: 'fix: b' }],
     ]);
     const refs = new Map<string, string>([['refs/heads/main', 'main0']]);
@@ -249,7 +249,7 @@ describe('GitHub · criação da branch de release', () => {
       'GET /git/ref/heads/main': () => ({ object: { sha: refs.get('refs/heads/main') } }),
       'GET /pulls/12': () => ({ number: 12, merge_commit_sha: 'm12' }),
       'GET /pulls/15': () => ({ number: 15, merge_commit_sha: 's15' }),
-      'GET /user': () => ({ id: 1, login: 'pedro', name: 'Pedro Carlo' }),
+      'GET /user': () => ({ id: 1, login: 'alex', name: 'Alex Rivera' }),
       'POST /git/commits': ({ body }) => {
         const sha = `c${++seq}`;
         commits.set(sha, { tree: body.tree, parents: body.parents, message: body.message });
@@ -290,7 +290,7 @@ describe('GitHub · criação da branch de release', () => {
       return fetchImpl(input, init);
     };
     const sourceControl = new GitHubSourceControl(
-      { owner: 'muralis', releasePattern: DEFAULT_RELEASE_PATTERN, developBranch: 'develop' },
+      { owner: 'acme', releasePattern: DEFAULT_RELEASE_PATTERN, developBranch: 'develop' },
       async () => 't',
       dynamic,
       1,
@@ -314,7 +314,7 @@ describe('GitHub · criação da branch de release', () => {
     expect(first).toMatchObject({ tree: 't-main+12', parents: ['main0'] });
     expect(second).toMatchObject({ tree: 't-main+12+15', parents: [second.parents[0]] });
     // A mensagem leva o número do PR: a de merge já tinha, a de squash sem número ganha.
-    expect(first.message.split('\n')[0]).toBe('Merge pull request #12 from muralis/a');
+    expect(first.message.split('\n')[0]).toBe('Merge pull request #12 from acme/a');
     expect(second.message).toBe('fix: b (#15)');
     expect(pullRequestIdsFromMessages([first.message, second.message])).toEqual([12, 15]);
   });
@@ -339,7 +339,7 @@ describe('GitHub · criação da branch de release', () => {
 });
 
 describe('Jira', () => {
-  const credentials = { site: 'muralis.atlassian.net', cloudId: 'cloud-1', email: 'pedro@muralis.com.br' };
+  const credentials = { site: 'acme.atlassian.net', cloudId: 'cloud-1', email: 'alex@example.com' };
   const jira = (routes: Record<string, Handler>) => {
     const { fetchImpl, calls } = fake(routes);
     return { tracking: new JiraWorkTracking(credentials, async () => 'api-token', fetchImpl, 1), calls };
@@ -354,15 +354,15 @@ describe('Jira', () => {
   const done = { name: 'Concluído', statusCategory: { key: 'done' } };
   const doing = { name: 'Em andamento', statusCategory: { key: 'indeterminate' } };
   const testing = { name: 'Em teste', statusCategory: { key: 'indeterminate' } };
-  const ref = { projectId: 'muralis', repositoryId: 'api', pullRequestId: 12, title: 'PROJ-7: exportar relatório', sourceBranch: 'feature/proj-7-exportar', webUrl: 'https://github.com/muralis/api/pull/12' };
+  const ref = { projectId: 'acme', repositoryId: 'api', pullRequestId: 12, title: 'PROJ-7: exportar relatório', sourceBranch: 'feature/proj-7-exportar', webUrl: 'https://github.com/acme/api/pull/12' };
 
   it('só aceita sites do Jira Cloud e resolve o cloudId', async () => {
-    expect(parseJiraSite('https://Muralis.atlassian.net/jira/software')).toBe('muralis.atlassian.net');
-    for (const bad of ['evil.com', 'muralis.atlassian.net.evil.com', 'localhost', '', 42]) {
+    expect(parseJiraSite('https://Acme.atlassian.net/jira/software')).toBe('acme.atlassian.net');
+    for (const bad of ['evil.com', 'acme.atlassian.net.evil.com', 'localhost', '', 42]) {
       expect(() => parseJiraSite(bad), String(bad)).toThrow(ValidationError);
     }
     const { fetchImpl } = fake({ 'GET /_edge/tenant_info': () => ({ cloudId: '11111111-2222-3333-4444-555555555555' }) });
-    expect(await resolveCloudId('muralis.atlassian.net', fetchImpl)).toBe('11111111-2222-3333-4444-555555555555');
+    expect(await resolveCloudId('acme.atlassian.net', fetchImpl)).toBe('11111111-2222-3333-4444-555555555555');
     await expect(resolveCloudId('naoexiste.atlassian.net', fake({}).fetchImpl)).rejects.toThrow('Não encontrei um Jira');
   });
 
@@ -382,7 +382,7 @@ describe('Jira', () => {
     const items = await tracking.listWorkItemsForPullRequest(ref);
 
     expect(calls[0]!.path).toBe('/ex/jira/cloud-1/rest/api/3/search/jql');
-    expect(calls[0]!.headers.Authorization).toBe(`Basic ${Buffer.from('pedro@muralis.com.br:api-token').toString('base64')}`);
+    expect(calls[0]!.headers.Authorization).toBe(`Basic ${Buffer.from('alex@example.com:api-token').toString('base64')}`);
     expect(calls.find((c) => c.method === 'POST')!.body.jql).toBe(`issue in issuesWithRemoteLinksByGlobalId("${remoteLinkGlobalId(ref)}")`);
     expect(items).toEqual([
       {
@@ -391,14 +391,14 @@ describe('Jira', () => {
         title: 'Exportar relatório',
         kind: 'task',
         state: { name: 'Em teste', category: 'testing' },
-        webUrl: 'https://muralis.atlassian.net/browse/PROJ-7',
+        webUrl: 'https://acme.atlassian.net/browse/PROJ-7',
         parent: {
           id: 1001,
           key: 'PROJ-1',
           title: 'Relatórios',
           kind: 'pbi',
           state: { name: 'Em andamento', category: 'in-progress' },
-          webUrl: 'https://muralis.atlassian.net/browse/PROJ-1',
+          webUrl: 'https://acme.atlassian.net/browse/PROJ-1',
         },
       },
       {
@@ -407,7 +407,7 @@ describe('Jira', () => {
         title: 'Corrigir arredondamento',
         kind: 'bug',
         state: { name: 'Concluído', category: 'done' },
-        webUrl: 'https://muralis.atlassian.net/browse/PROJ-9',
+        webUrl: 'https://acme.atlassian.net/browse/PROJ-9',
         parent: undefined,
       },
     ]);
@@ -423,9 +423,9 @@ describe('Jira', () => {
       'POST /search/jql': () => ({ issues: [] }),
       'GET /issue/PROJ-7': () => issue('1007', 'PROJ-7', 'Exportar', story, doing),
     });
-    await tracking.searchWorkItems('muralis', 'relatório "x" \\ y');
+    await tracking.searchWorkItems('acme', 'relatório "x" \\ y');
     expect(calls[0]!.body).toMatchObject({ jql: 'summary ~ "relatório x y*" AND hierarchyLevel <= 0 ORDER BY updated DESC', maxResults: 8 });
-    expect((await tracking.searchWorkItems('muralis', 'proj-7')).map((w) => w.key)).toEqual(['PROJ-7']);
+    expect((await tracking.searchWorkItems('acme', 'proj-7')).map((w) => w.key)).toEqual(['PROJ-7']);
   });
 
   it('vincula como remote link para o PR e desfaz pelo mesmo identificador', async () => {
@@ -435,13 +435,13 @@ describe('Jira', () => {
     });
     await tracking.linkPullRequest(1007, ref);
     expect(calls[0]!.body).toEqual({
-      globalId: 'release-management:pr:muralis/api#12',
+      globalId: 'release-management:pr:acme/api#12',
       application: { type: 'release-management', name: 'Release Management' },
       relationship: 'pull request',
-      object: { url: 'https://github.com/muralis/api/pull/12', title: 'PR #12: PROJ-7: exportar relatório' },
+      object: { url: 'https://github.com/acme/api/pull/12', title: 'PR #12: PROJ-7: exportar relatório' },
     });
     await tracking.unlinkPullRequest(1007, ref);
-    expect(calls[1]!.query.get('globalId')).toBe('release-management:pr:muralis/api#12');
+    expect(calls[1]!.query.get('globalId')).toBe('release-management:pr:acme/api#12');
     await expect(tracking.linkPullRequest(1007, { ...ref, webUrl: undefined })).rejects.toBeInstanceOf(ValidationError);
   });
 

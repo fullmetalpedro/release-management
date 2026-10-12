@@ -30,7 +30,7 @@ import {
   type PatValidator,
 } from './patProviders.ts';
 import { PatTransport } from './patTransport.ts';
-import { PEDRO } from '../memory/world.ts';
+import { ALEX } from '../memory/world.ts';
 import type { PatProvider, Session, SessionStore, SourceProvider } from '../session/sessionStore.ts';
 import { localeFrom, msg, render } from '../../i18n.ts';
 
@@ -292,7 +292,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (config.demo) {
       // Quem já está na demonstração continua na mesma sessão, em vez de acumular outra a cada visita.
       if (!sessionOf(request)) {
-        startSession(reply, sessions.create({ mode: 'demo', user: { name: PEDRO.name, email: PEDRO.email } }));
+        startSession(reply, sessions.create({ mode: 'demo', user: { name: ALEX.name, email: ALEX.email } }));
       }
       return reply.redirect(config.appUrl);
     }

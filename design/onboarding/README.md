@@ -32,7 +32,7 @@ Se o visual do app mudar, as capturas precisam ser refeitas. O roteiro está em 
 const tour = await import('http://localhost:5180/capture.js');
 await tour.token();   // instância normal, em /login, aba Token pessoal
 await tour.board();   // demonstração, logado, no board
-await tour.release(); // demonstração, em /release?repo=r-getnota-api, depois do board()
+await tour.release(); // demonstração, em /release?repo=r-invoicing-api, depois do board()
 ```
 
 Depois, `node design/onboarding/build.mjs`. Na tela de token, a resposta do servidor é simulada no console para chegar ao estado validado sem um token real.

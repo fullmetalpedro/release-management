@@ -4,7 +4,7 @@
 //   const tour = await import('http://localhost:5180/capture.js');
 //   await tour.token();    // na instância normal, em /login, aba Token pessoal
 //   await tour.board();    // na demonstração (AUTH_MODE=demo), logado, no board
-//   await tour.release();  // na demonstração, em /release?repo=r-getnota-api, logo depois do board()
+//   await tour.release();  // na demonstração, em /release?repo=r-invoicing-api, logo depois do board()
 //
 // Cada captura guarda o HTML do body, os valores dos campos, a rolagem e a posição dos alvos do cursor.
 // Os alvos ficam marcados com data-tour, para o tour aplicar hover e foco neles com o CSS do próprio app.
@@ -74,15 +74,15 @@ export async function token() {
   const real = window.fetch.bind(window);
   let connected = false;
   const me = {
-    user: { name: 'Pedro Carlo', email: 'pedro.carlo@muralis.com.br' },
+    user: { name: 'Alex Rivera', email: 'alex.rivera@example.com' },
     demo: false,
     mode: 'pat',
     loginProvider: 'microsoft',
-    organization: 'muralisti',
+    organization: 'acme',
     source: { provider: 'azure-devops', name: 'Azure DevOps' },
     tracker: { provider: 'azure-devops', name: 'Azure DevOps' },
     accounts: [
-      { provider: 'azure-devops', connected: true, active: true, handle: 'pedro.carlo@muralis.com.br', account: 'muralisti' },
+      { provider: 'azure-devops', connected: true, active: true, handle: 'alex.rivera@example.com', account: 'acme' },
       { provider: 'github', connected: false },
       { provider: 'jira', connected: false },
     ],
@@ -93,7 +93,7 @@ export async function token() {
     if (url.includes('/auth/pat/azure-devops')) {
       await wait(4000);
       connected = true;
-      return json({ provider: 'azure-devops', account: 'muralisti', user: { name: 'Pedro Carlo' } });
+      return json({ provider: 'azure-devops', account: 'acme', user: { name: 'Alex Rivera' } });
     }
     if (url.includes('/api/me') && connected) return json(me);
     return real(input, init);

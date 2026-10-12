@@ -54,14 +54,14 @@ describe('login com Microsoft', () => {
           access_token: 'at',
           refresh_token: 'rt',
           expires_in: 3600,
-          id_token: idToken({ name: 'Pedro Carlo', preferred_username: 'pedro.carlo@muralis.com.br' }),
+          id_token: idToken({ name: 'Alex Rivera', preferred_username: 'alex.rivera@example.com' }),
         });
       },
       () => 1_000,
     );
     const result = await provider.completeLogin('codigo', 'verificador');
 
-    expect(result.profile).toEqual({ name: 'Pedro Carlo', email: 'pedro.carlo@muralis.com.br' });
+    expect(result.profile).toEqual({ name: 'Alex Rivera', email: 'alex.rivera@example.com' });
     expect(result.tokens).toEqual({ accessToken: 'at', refreshToken: 'rt', expiresAt: 3_601_000 });
     expect(Object.fromEntries(sent!)).toMatchObject({
       grant_type: 'authorization_code',
@@ -90,11 +90,11 @@ describe('sessões', () => {
     const secret = 'x'.repeat(32);
     const session = new SessionStore(secret, file).create({
       mode: 'microsoft',
-      user: { name: 'Pedro Carlo' },
+      user: { name: 'Alex Rivera' },
       tokens: { accessToken: 'at-secreto', refreshToken: 'rt-secreto', expiresAt: 1 },
     });
 
-    expect(readFileSync(file).toString('latin1')).not.toMatch(/secreto|Pedro/);
+    expect(readFileSync(file).toString('latin1')).not.toMatch(/secreto|Alex/);
     expect(new SessionStore(secret, file).get(session.id)?.tokens?.refreshToken).toBe('rt-secreto');
     expect(new SessionStore('y'.repeat(32), file).get(session.id)).toBeUndefined();
   });
@@ -112,16 +112,16 @@ describe('configuração', () => {
       ENTRA_CLIENT_ID: 'c',
       ENTRA_TENANT_ID: 't',
       ENTRA_CLIENT_SECRET: 's',
-      AZDO_ORG: 'muralis',
+      AZDO_ORG: 'acme',
       SESSION_SECRET: 'x'.repeat(32),
-      AZDO_PROJECTS: 'GetNota, Lead Comex ,Jane',
-      APP_URL: 'https://rm.muralis.com.br/',
+      AZDO_PROJECTS: 'Invoicing, Trade Desk ,Scheduler',
+      APP_URL: 'https://rm.example.com/',
     });
     expect(config).toMatchObject({
       demo: false,
-      organization: 'muralis',
-      projects: ['GetNota', 'Lead Comex', 'Jane'],
-      entra: { redirectUri: 'https://rm.muralis.com.br/auth/microsoft/callback' },
+      organization: 'acme',
+      projects: ['Invoicing', 'Trade Desk', 'Scheduler'],
+      entra: { redirectUri: 'https://rm.example.com/auth/microsoft/callback' },
     });
   });
 });
@@ -145,30 +145,30 @@ describe('servidor HTTP', () => {
   });
 
   it('entra, lista projetos e carrega o board', async () => {
-    const { app, cookie, login } = await demoServer({ AZDO_PROJECTS: 'GetNota,Lead Comex,Jane' });
+    const { app, cookie, login } = await demoServer({ AZDO_PROJECTS: 'Invoicing,Trade Desk,Scheduler' });
     expect(login.statusCode).toBe(302);
     expect(String(login.headers['set-cookie'])).toMatch(/HttpOnly/i);
 
     const me = await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } });
-    expect(me.json()).toMatchObject({ user: { name: 'Pedro Carlo' }, demo: true });
+    expect(me.json()).toMatchObject({ user: { name: 'Alex Rivera' }, demo: true });
     expect(me.json().accounts.filter((a: { connected: boolean }) => a.connected)).toEqual([
-      { provider: 'azure-devops', connected: true, active: true, handle: 'pedro.carlo@example.com' },
+      { provider: 'azure-devops', connected: true, active: true, handle: 'alex.rivera@example.com' },
     ]);
 
     const projects = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
     expect(projects.json().map((p: { name: string; openPullRequests: number }) => [p.name, p.openPullRequests])).toEqual([
-      ['GetNota', 11],
-      ['Lead Comex', 4],
-      ['Jane', 7],
+      ['Invoicing', 11],
+      ['Trade Desk', 4],
+      ['Scheduler', 7],
     ]);
 
-    const board = await app.inject({ method: 'GET', url: '/api/projects/p-getnota/board', headers: { cookie } });
+    const board = await app.inject({ method: 'GET', url: '/api/projects/p-invoicing/board', headers: { cookie } });
     expect(board.json().columns.dependsOnMe).toHaveLength(4);
   });
 
   it('exige o cabeçalho anti-CSRF nas escritas e devolve 409 no conflito', async () => {
     const { app, cookie } = await demoServer({ DEMO_FAIL: 'conflict:1291' });
-    const url = '/api/projects/p-getnota/repositories/r-getnota-api/releases';
+    const url = '/api/projects/p-invoicing/repositories/r-invoicing-api/releases';
     const payload = { name: 'release/2.16', pullRequestIds: [1295, 1291] };
 
     const forged = await app.inject({ method: 'POST', url, headers: { cookie }, payload });
@@ -190,7 +190,7 @@ describe('servidor HTTP', () => {
 
   it('falha de sincronização vira 502 e sair encerra a sessão', async () => {
     const { app, cookie } = await demoServer({ DEMO_FAIL: 'sync' });
-    const board = await app.inject({ method: 'GET', url: '/api/projects/p-getnota/board', headers: { cookie } });
+    const board = await app.inject({ method: 'GET', url: '/api/projects/p-invoicing/board', headers: { cookie } });
     expect(board.statusCode).toBe(502);
     expect(board.json()).toMatchObject({ code: 'provider-unavailable', provider: 'azure-devops' });
 
@@ -203,7 +203,7 @@ describe('servidor HTTP', () => {
       ENTRA_CLIENT_ID: 'c',
       ENTRA_TENANT_ID: 't',
       ENTRA_CLIENT_SECRET: 's',
-      AZDO_ORG: 'muralis',
+      AZDO_ORG: 'acme',
       SESSION_SECRET: 'x'.repeat(32),
       DATA_DIR: mkdtempSync(join(tmpdir(), 'rm-')),
     });
@@ -211,12 +211,16 @@ describe('servidor HTTP', () => {
       beginLogin: () => ({ url: 'https://login.example/authorize', state: 'estado', codeVerifier: 'verificador' }),
       completeLogin: async (code, verifier) => {
         expect([code, verifier]).toEqual(['codigo', 'verificador']);
-        return { tokens: { accessToken: 'at', expiresAt: Date.now() + 3_600_000 }, profile: { name: 'Pedro Carlo' } };
+        return { tokens: { accessToken: 'at', expiresAt: Date.now() + 3_600_000 }, profile: { name: 'Alex Rivera' } };
       },
       refresh: async () => ({ accessToken: 'at', expiresAt: 0 }),
     };
     const sessions = new SessionStore(config.sessionSecret);
-    const app = await buildServer({ config, sessions, registry: new ConnectionRegistry(config, sessions, identityProvider), identityProvider, webDist: '/nao-existe' });
+    // O teste não sai para a internet: no lugar do Azure DevOps entram os adapters de memória.
+    const registry = new ConnectionRegistry(config, sessions, identityProvider);
+    const world = createWorld();
+    registry.for = () => ({ sourceControl: new MemorySourceControl(world), workTracking: new MemoryWorkTracking(world) });
+    const app = await buildServer({ config, sessions, registry, identityProvider, webDist: '/nao-existe' });
 
     const start = await app.inject({ method: 'GET', url: '/auth/microsoft/login' });
     expect(start.headers.location).toBe('https://login.example/authorize');
@@ -233,16 +237,16 @@ describe('servidor HTTP', () => {
     expect(done.headers.location).toBe('http://localhost:5173');
     const sessionCookie = [done.headers['set-cookie']].flat().map(String).find((c) => c.startsWith('rm_session='))!.split(';')[0]!;
     const me = await app.inject({ method: 'GET', url: '/api/me', headers: { cookie: sessionCookie } });
-    expect(me.json()).toMatchObject({ user: { name: 'Pedro Carlo' }, demo: false, organization: 'muralis' });
+    expect(me.json()).toMatchObject({ user: { name: 'Alex Rivera' }, demo: false, organization: 'acme' });
   });
 });
 
 describe('conexão por token pessoal', () => {
-  const env = { SESSION_SECRET: 'x'.repeat(32), AZDO_ORG: 'muralisti' };
+  const env = { SESSION_SECRET: 'x'.repeat(32), AZDO_ORG: 'acme' };
   const token = 'pat-' + 'a'.repeat(60);
-  const pedro = { id: 'u1', name: 'Pedro Carlo', email: 'pedro.carlo@muralis.com.br' };
+  const alex = { id: 'u1', name: 'Alex Rivera', email: 'alex.rivera@example.com' };
 
-  async function patServer(validatePat: PatValidator = async () => ({ owner: pedro })) {
+  async function patServer(validatePat: PatValidator = async () => ({ owner: alex })) {
     const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
     const config = { ...loadConfig(env), sessionFile: file };
     const sessions = new SessionStore(config.sessionSecret, file);
@@ -280,7 +284,7 @@ describe('conexão por token pessoal', () => {
       microsoft: false,
       pat: true,
       demo: false,
-      defaultOrganization: 'muralisti',
+      defaultOrganization: 'acme',
     });
     const login = await app.inject({ method: 'GET', url: '/auth/microsoft/login' });
     expect(login.headers.location).toBe('http://localhost:5173/login?erro=indisponivel');
@@ -290,30 +294,30 @@ describe('conexão por token pessoal', () => {
     const seen: unknown[] = [];
     const { sessions, file, encrypt, connect, cookieOf, me } = await patServer(async (provider, input) => {
       seen.push([provider, input.account, input.token]);
-      return { owner: pedro };
+      return { owner: alex };
     });
 
     const encryptedToken = await encrypt(token);
     expect(encryptedToken).not.toContain(token);
-    const response = await connect('azure-devops', { organization: 'muralisti', encryptedToken });
+    const response = await connect('azure-devops', { organization: 'acme', encryptedToken });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ provider: 'azure-devops', account: 'muralisti', user: { name: 'Pedro Carlo', email: 'pedro.carlo@muralis.com.br' } });
+    expect(response.json()).toEqual({ provider: 'azure-devops', account: 'acme', user: { name: 'Alex Rivera', email: 'alex.rivera@example.com' } });
     expect(response.body).not.toContain(token);
-    expect(seen).toEqual([['azure-devops', 'muralisti', token]]);
+    expect(seen).toEqual([['azure-devops', 'acme', token]]);
 
     const cookie = cookieOf(response);
     expect(cookie).not.toContain(token);
     const profile = await me(cookie);
     expect(profile).toMatchObject({
       mode: 'pat',
-      organization: 'muralisti',
+      organization: 'acme',
       source: { provider: 'azure-devops', name: 'Azure DevOps' },
       tracker: { provider: 'azure-devops', name: 'Azure DevOps' },
     });
     // Azure DevOps sempre primeiro na lista de contas.
     expect(profile.accounts).toEqual([
-      { provider: 'azure-devops', connected: true, active: true, handle: 'pedro.carlo@muralis.com.br', account: 'muralisti' },
+      { provider: 'azure-devops', connected: true, active: true, handle: 'alex.rivera@example.com', account: 'acme' },
       { provider: 'github', connected: false },
       { provider: 'jira', connected: false },
     ]);
@@ -331,7 +335,7 @@ describe('conexão por token pessoal', () => {
     const { connect, encrypt } = await patServer(async () => {
       throw new NotAuthenticatedError();
     });
-    const response = await connect('github', { organization: 'muralis', encryptedToken: await encrypt(token) });
+    const response = await connect('github', { organization: 'acme', encryptedToken: await encrypt(token) });
     expect(response.statusCode).toBe(422);
     expect(response.json()).toMatchObject({ code: 'invalid-token', message: expect.stringContaining('GitHub') });
     expect(response.headers['set-cookie']).toBeUndefined();
@@ -343,31 +347,31 @@ describe('conexão por token pessoal', () => {
     expect((await connect('azure-devops', { organization: 'evil.com/x?', encryptedToken })).statusCode).toBe(400);
     expect((await connect('github', { organization: 'evil.com', encryptedToken })).statusCode).toBe(400);
     expect((await connect('jira', { site: 'evil.com', email: 'a@b.co', encryptedToken })).statusCode).toBe(400);
-    expect((await connect('jira', { site: 'muralis.atlassian.net', email: 'sem-arroba', encryptedToken })).statusCode).toBe(400);
-    expect((await connect('azure-devops', { organization: 'muralisti', encryptedToken: Buffer.from(token).toString('base64') })).statusCode).toBe(400);
-    expect((await connect('gitlab', { organization: 'muralis', encryptedToken })).statusCode).toBe(404);
-    const forged = await app.inject({ method: 'POST', url: '/auth/pat/azure-devops', payload: { organization: 'muralisti', encryptedToken } });
+    expect((await connect('jira', { site: 'acme.atlassian.net', email: 'sem-arroba', encryptedToken })).statusCode).toBe(400);
+    expect((await connect('azure-devops', { organization: 'acme', encryptedToken: Buffer.from(token).toString('base64') })).statusCode).toBe(400);
+    expect((await connect('gitlab', { organization: 'acme', encryptedToken })).statusCode).toBe(404);
+    const forged = await app.inject({ method: 'POST', url: '/auth/pat/azure-devops', payload: { organization: 'acme', encryptedToken } });
     expect(forged.statusCode).toBe(400);
   });
 
   it('as plataformas se somam na mesma sessão, e a ativa pode ser trocada', async () => {
     const { app, connect, encrypt, cookieOf, me } = await patServer(async (provider) => ({
-      owner: provider === 'github' ? { id: 'gh1', name: 'pedro-gh', email: 'fullmetalpedro' } : provider === 'jira' ? { id: 'j1', name: 'Pedro Jira', email: 'pedro@muralis.com.br' } : pedro,
+      owner: provider === 'github' ? { id: 'gh1', name: 'alex-gh', email: 'alex-rivera' } : provider === 'jira' ? { id: 'j1', name: 'Alex Jira', email: 'alex@example.com' } : alex,
       cloudId: provider === 'jira' ? 'cloud-123' : undefined,
     }));
-    const first = await connect('azure-devops', { organization: 'muralisti', encryptedToken: await encrypt(token) });
+    const first = await connect('azure-devops', { organization: 'acme', encryptedToken: await encrypt(token) });
     const cookie = cookieOf(first);
 
-    const github = await connect('github', { organization: 'muralis-gh', encryptedToken: await encrypt(token) }, { cookie });
+    const github = await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }, { cookie });
     expect(github.statusCode).toBe(200);
     expect(github.headers['set-cookie']).toBeUndefined();
-    await connect('jira', { site: 'https://Muralis.atlassian.net/jira', email: 'pedro@muralis.com.br', encryptedToken: await encrypt(token) }, { cookie });
+    await connect('jira', { site: 'https://Acme.atlassian.net/jira', email: 'alex@example.com', encryptedToken: await encrypt(token) }, { cookie });
 
     let profile = await me(cookie);
     expect(profile.accounts.map((a: { provider: string; connected: boolean; active?: boolean; account?: string }) => [a.provider, a.connected, a.active, a.account])).toEqual([
-      ['azure-devops', true, true, 'muralisti'],
-      ['github', true, false, 'muralis-gh'],
-      ['jira', true, false, 'muralis.atlassian.net'],
+      ['azure-devops', true, true, 'acme'],
+      ['github', true, false, 'acme-gh'],
+      ['jira', true, false, 'acme.atlassian.net'],
     ]);
     expect(profile.source.provider).toBe('azure-devops');
 
@@ -379,7 +383,7 @@ describe('conexão por token pessoal', () => {
 
     profile = await me(cookie);
     expect(profile).toMatchObject({
-      organization: 'muralis-gh',
+      organization: 'acme-gh',
       source: { provider: 'github', name: 'GitHub' },
       // Com o GitHub ativo, as tarefas vêm do Jira conectado.
       tracker: { provider: 'jira', name: 'Jira' },
@@ -388,8 +392,8 @@ describe('conexão por token pessoal', () => {
 
   it('trocar o token de uma plataforma mantém a sessão e as outras conexões', async () => {
     const { connect, encrypt, cookieOf, me } = await patServer();
-    const cookie = cookieOf(await connect('azure-devops', { organization: 'muralisti', encryptedToken: await encrypt(token) }));
-    await connect('github', { organization: 'muralis-gh', encryptedToken: await encrypt(token) }, { cookie });
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'acme', encryptedToken: await encrypt(token) }));
+    await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }, { cookie });
     await connect('azure-devops', { organization: 'outra-org', encryptedToken: await encrypt(token) }, { cookie });
 
     const profile = await me(cookie);
@@ -398,8 +402,8 @@ describe('conexão por token pessoal', () => {
   });
 
   it('só o Jira conectado não basta para abrir o board', async () => {
-    const { app, connect, encrypt, cookieOf, me } = await patServer(async () => ({ owner: pedro, cloudId: 'c1' }));
-    const cookie = cookieOf(await connect('jira', { site: 'muralis.atlassian.net', email: 'pedro@muralis.com.br', encryptedToken: await encrypt(token) }));
+    const { app, connect, encrypt, cookieOf, me } = await patServer(async () => ({ owner: alex, cloudId: 'c1' }));
+    const cookie = cookieOf(await connect('jira', { site: 'acme.atlassian.net', email: 'alex@example.com', encryptedToken: await encrypt(token) }));
     expect(await me(cookie)).toMatchObject({ source: null, tracker: null });
     const projects = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
     expect(projects.statusCode).toBe(400);
@@ -410,11 +414,11 @@ describe('conexão por token pessoal', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
     const secret = 'x'.repeat(32);
     const store = new SessionStore(secret, file);
-    const session = store.create({ mode: 'pat', user: { name: 'Pedro' }, ...({ pat: { organization: 'muralisti', sealedToken: store.seal(token) } } as object) });
+    const session = store.create({ mode: 'pat', user: { name: 'Alex' }, ...({ pat: { organization: 'acme', sealedToken: store.seal(token) } } as object) });
 
     const reloaded = new SessionStore(secret, file).get(session.id)!;
     expect(reloaded.activeSource).toBe('azure-devops');
-    expect(reloaded.connections!['azure-devops']!.account).toBe('muralisti');
+    expect(reloaded.connections!['azure-devops']!.account).toBe('acme');
     expect(store.open(reloaded.connections!['azure-devops']!.sealedToken)).toBe(token);
   });
 });

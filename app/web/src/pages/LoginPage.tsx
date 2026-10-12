@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import { GitHubLogo, JiraLogo, MicrosoftLogo } from '../components/logos';
+import { AppMark, GitHubLogo, JiraLogo, MicrosoftLogo } from '../components/logos';
 import { useToast } from '../components/toast';
 import { cx } from '../components/ui';
 import { useStoredState } from '../lib/format';
@@ -115,7 +115,7 @@ function ProviderLoginPage({ available }: { available: boolean }) {
         )}
       >
         <div className="flex w-full flex-col items-center gap-5">
-          <img src="/muralis-logo-full.png" alt="Muralis" className="h-[5.3125rem] w-[9.375rem] object-contain" />
+          <AppMark size={64} />
           <h1 className="text-2xl font-bold tracking-[-0.4px] text-ink">Release Management</h1>
         </div>
         <div className="flex w-full flex-col gap-3">

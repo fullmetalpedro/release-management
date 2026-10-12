@@ -46,7 +46,7 @@ export function authorLabel(person: PersonView): string {
   return person.isMe ? t('common.you') : person.name;
 }
 
-// "Criada em 08/10 por Manoel Martins a partir de develop" / "Created just now by you from main".
+// "Criada em 08/10 por Sam Carter a partir de develop" / "Created just now by you from main".
 export function releaseMeta(release: ReleaseView, now = Date.now()): string {
   const parts = [t('releaseMeta.created')];
   if (release.createdAt) {

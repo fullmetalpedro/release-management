@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemorySourceControl, MemoryWorkTracking } from '../src/adapters/memory/memoryAdapters.ts';
-import { createWorld, MANOEL, PEDRO } from '../src/adapters/memory/world.ts';
+import { createWorld, SAM, ALEX } from '../src/adapters/memory/world.ts';
 import { CherryPickConflictError, ProviderUnavailableError, ValidationError } from '../src/core/domain/errors.ts';
 import type { PullRequest, ReviewDecision } from '../src/core/domain/types.ts';
 import { classify, getBoard } from '../src/core/usecases/board.ts';
@@ -17,9 +17,9 @@ import {
 import { linkWorkItem, searchWorkItems, unlinkWorkItem } from '../src/core/usecases/workItems.ts';
 
 const branching = { developBranch: 'develop', baseBranches: ['main', 'master'], releasePattern: DEFAULT_RELEASE_PATTERN, firstRelease: 'release/1.0' };
-const api = { projectId: 'p-getnota', repositoryId: 'r-getnota-api', branching };
+const api = { projectId: 'p-invoicing', repositoryId: 'r-invoicing-api', branching };
 
-function pr(overrides: Partial<PullRequest>, votes: [typeof PEDRO, ReviewDecision][] = []): PullRequest {
+function pr(overrides: Partial<PullRequest>, votes: [typeof ALEX, ReviewDecision][] = []): PullRequest {
   return {
     provider: 'azure-devops',
     id: 1,
@@ -27,7 +27,7 @@ function pr(overrides: Partial<PullRequest>, votes: [typeof PEDRO, ReviewDecisio
     repository: { id: 'r', name: 'r', projectId: 'p' },
     sourceBranch: 'f',
     targetBranch: 'develop',
-    author: MANOEL,
+    author: SAM,
     createdAt: '2026-10-01T00:00:00Z',
     status: 'open',
     isDraft: false,
@@ -42,49 +42,49 @@ function pr(overrides: Partial<PullRequest>, votes: [typeof PEDRO, ReviewDecisio
 
 describe('classificação do board', () => {
   it('pede minha revisão quando sou revisor e ainda não votei', () => {
-    expect(classify(pr({}, [[PEDRO, 'pending']]), PEDRO)).toEqual({ column: 'dependsOnMe', reason: 'reviewer' });
+    expect(classify(pr({}, [[ALEX, 'pending']]), ALEX)).toEqual({ column: 'dependsOnMe', reason: 'reviewer' });
   });
 
   it('volta para mim quando sou autor e um revisor aguarda o autor', () => {
-    const mine = pr({ author: PEDRO }, [[MANOEL, 'waiting-author']]);
-    expect(classify(mine, PEDRO)).toEqual({ column: 'dependsOnMe', reason: 'waiting-author' });
+    const mine = pr({ author: ALEX }, [[SAM, 'waiting-author']]);
+    expect(classify(mine, ALEX)).toEqual({ column: 'dependsOnMe', reason: 'waiting-author' });
   });
 
   it('depende de mim tem prioridade sobre conflito', () => {
-    const mine = pr({ author: PEDRO, mergeState: 'conflicts' }, [[MANOEL, 'rejected']]);
-    expect(classify(mine, PEDRO).column).toBe('dependsOnMe');
+    const mine = pr({ author: ALEX, mergeState: 'conflicts' }, [[SAM, 'rejected']]);
+    expect(classify(mine, ALEX).column).toBe('dependsOnMe');
   });
 
   it('não cobra meu voto opcional quando o PR já tem as aprovações da política', () => {
-    const votes: [typeof PEDRO, ReviewDecision][] = [[PEDRO, 'pending'], [{ ...MANOEL, id: 'x' }, 'approved']];
-    expect(classify(pr({ requiredApprovals: 1 }, votes), PEDRO).column).toBe('ready');
-    expect(classify(pr({ requiredApprovals: 2 }, votes), PEDRO)).toEqual({ column: 'dependsOnMe', reason: 'reviewer' });
+    const votes: [typeof ALEX, ReviewDecision][] = [[ALEX, 'pending'], [{ ...SAM, id: 'x' }, 'approved']];
+    expect(classify(pr({ requiredApprovals: 1 }, votes), ALEX).column).toBe('ready');
+    expect(classify(pr({ requiredApprovals: 2 }, votes), ALEX)).toEqual({ column: 'dependsOnMe', reason: 'reviewer' });
     // Aprovações completas, mas outra política (build, comentários) ainda barra: não é o meu voto que falta.
-    expect(classify(pr({ requiredApprovals: 1, blockedByPolicy: true }, votes), PEDRO).column).toBe('review');
+    expect(classify(pr({ requiredApprovals: 1, blockedByPolicy: true }, votes), ALEX).column).toBe('review');
   });
 
   it('não cobra revisão de rascunho', () => {
-    expect(classify(pr({ isDraft: true }, [[PEDRO, 'pending']]), PEDRO).column).toBe('review');
+    expect(classify(pr({ isDraft: true }, [[ALEX, 'pending']]), ALEX).column).toBe('review');
   });
 
   it('conflito bloqueia mesmo aprovado', () => {
-    expect(classify(pr({ mergeState: 'conflicts' }, [[MANOEL, 'approved']]), PEDRO).column).toBe('conflict');
+    expect(classify(pr({ mergeState: 'conflicts' }, [[SAM, 'approved']]), ALEX).column).toBe('conflict');
   });
 
   it('pronto pra merge exige todos os revisores aprovando', () => {
-    expect(classify(pr({ author: PEDRO }, [[MANOEL, 'approved']]), PEDRO).column).toBe('ready');
-    expect(classify(pr({ author: PEDRO }, []), PEDRO).column).toBe('review');
+    expect(classify(pr({ author: ALEX }, [[SAM, 'approved']]), ALEX).column).toBe('ready');
+    expect(classify(pr({ author: ALEX }, []), ALEX).column).toBe('review');
   });
 
   it('a política de branch define o mínimo de aprovações e pode barrar o merge', () => {
-    const votes: [typeof PEDRO, ReviewDecision][] = [[MANOEL, 'approved'], [{ ...MANOEL, id: 'x' }, 'pending']];
-    expect(classify(pr({ author: PEDRO, requiredApprovals: 1 }, votes), PEDRO).column).toBe('ready');
-    expect(classify(pr({ author: PEDRO, requiredApprovals: 2 }, votes), PEDRO).column).toBe('review');
-    expect(classify(pr({ author: PEDRO, requiredApprovals: 1, blockedByPolicy: true }, votes), PEDRO).column).toBe('review');
+    const votes: [typeof ALEX, ReviewDecision][] = [[SAM, 'approved'], [{ ...SAM, id: 'x' }, 'pending']];
+    expect(classify(pr({ author: ALEX, requiredApprovals: 1 }, votes), ALEX).column).toBe('ready');
+    expect(classify(pr({ author: ALEX, requiredApprovals: 2 }, votes), ALEX).column).toBe('review');
+    expect(classify(pr({ author: ALEX, requiredApprovals: 1, blockedByPolicy: true }, votes), ALEX).column).toBe('review');
   });
 
-  it('distribui os PRs do GetNota como no design', async () => {
-    const board = await getBoard({ sourceControl: new MemorySourceControl(createWorld()) }, 'p-getnota');
+  it('distribui os PRs do Invoicing como no design', async () => {
+    const board = await getBoard({ sourceControl: new MemorySourceControl(createWorld()) }, 'p-invoicing');
     expect(board.openCount).toBe(11);
     expect(Object.fromEntries(Object.entries(board.columns).map(([k, v]) => [k, v.length]))).toEqual({
       dependsOnMe: 4,
@@ -94,7 +94,7 @@ describe('classificação do board', () => {
     });
     const waiting = board.columns.dependsOnMe.find((c) => c.id === 642)!;
     expect(waiting).toMatchObject({ reason: 'waiting-author', conflictCount: 1, approvals: 0, reviewers: 2 });
-    expect(waiting.author).toEqual({ name: 'Pedro Carlo', isMe: true });
+    expect(waiting.author).toEqual({ name: 'Alex Rivera', isMe: true });
     // Só o #1287 me tem como revisor obrigatório; no #311 sou opcional.
     expect(board.columns.dependsOnMe.map((c) => [c.id, c.reason, c.requiredReviewer])).toEqual([
       [1287, 'reviewer', true],
@@ -108,10 +108,10 @@ describe('classificação do board', () => {
 describe('projetos', () => {
   it('respeita a lista e a ordem configuradas, ignorando caixa e espaços', async () => {
     const sourceControl = new MemorySourceControl(createWorld());
-    const projects = await listProjects({ sourceControl }, ['jane', 'LeadComex']);
+    const projects = await listProjects({ sourceControl }, ['scheduler', 'Trade Desk']);
     expect(projects).toEqual([
-      { id: 'p-jane', name: 'Jane', openPullRequests: 7 },
-      { id: 'p-leadcomex', name: 'Lead Comex', openPullRequests: 4 },
+      { id: 'p-scheduler', name: 'Scheduler', openPullRequests: 7 },
+      { id: 'p-trade', name: 'Trade Desk', openPullRequests: 4 },
     ]);
   });
 });
@@ -167,32 +167,32 @@ describe('mergeados e release', () => {
     expect(lane.suggestedBranch).toBe('release/2.16');
     expect(lane.release).toMatchObject({ name: 'release/2.15', isLatest: true, baseBranch: 'develop' });
     expect(lane.release!.pullRequests.map((p) => p.id)).toEqual([1284, 1282, 1276, 1274, 1270, 1268]);
-    expect(lane.release!.createdBy).toEqual({ name: 'Manoel Martins', isMe: false });
+    expect(lane.release!.createdBy).toEqual({ name: 'Sam Carter', isMe: false });
   });
 
   it('carrega as raias de todos os repositórios de uma vez e tolera a falha de um', async () => {
     const sourceControl = new MemorySourceControl(createWorld());
-    const all = await getReleaseLanes({ sourceControl }, { projectId: 'p-getnota', branching });
+    const all = await getReleaseLanes({ sourceControl }, { projectId: 'p-invoicing', branching });
     expect(all.lanes.map((l) => [l.repository.name, l.merged.length, l.release?.name ?? null])).toEqual([
-      ['getnota-api', 5, 'release/2.15'],
-      ['getnota-web', 2, 'release/1.8'],
-      ['getnota-worker', 0, null],
-      ['getnota-infra', 0, null],
+      ['invoicing-api', 5, 'release/2.15'],
+      ['invoicing-web', 2, 'release/1.8'],
+      ['invoicing-worker', 0, null],
+      ['invoicing-infra', 0, null],
     ]);
 
     const original = sourceControl.listMergedPullRequests.bind(sourceControl);
     sourceControl.listMergedPullRequests = async (repository, target) => {
-      if (repository.name === 'getnota-web') throw new ProviderUnavailableError('azure-devops', 'caiu');
+      if (repository.name === 'invoicing-web') throw new ProviderUnavailableError('azure-devops', 'caiu');
       return original(repository, target);
     };
-    const partial = await getReleaseLanes({ sourceControl }, { projectId: 'p-getnota', branching });
-    expect(partial.lanes.map((l) => l.repository.name)).toEqual(['getnota-api', 'getnota-worker', 'getnota-infra']);
+    const partial = await getReleaseLanes({ sourceControl }, { projectId: 'p-invoicing', branching });
+    expect(partial.lanes.map((l) => l.repository.name)).toEqual(['invoicing-api', 'invoicing-worker', 'invoicing-infra']);
   });
 
   it('repositório sem release sugere a primeira versão', async () => {
     const lane = await getReleaseLane(
       { sourceControl: new MemorySourceControl(createWorld()) },
-      { ...api, repositoryId: 'r-getnota-worker' },
+      { ...api, repositoryId: 'r-invoicing-worker' },
     );
     expect(lane).toMatchObject({ release: null, merged: [], suggestedBranch: 'release/1.0' });
   });
@@ -203,7 +203,7 @@ describe('mergeados e release', () => {
       { sourceControl },
       { ...api, name: 'release/2.16', pullRequestIds: [1295, 1294, 1291] },
     );
-    expect(created).toMatchObject({ name: 'release/2.16', pullRequests: 3, repository: 'getnota-api' });
+    expect(created).toMatchObject({ name: 'release/2.16', pullRequests: 3, repository: 'invoicing-api' });
 
     const lane = await getReleaseLane({ sourceControl }, api);
     expect(lane.merged.map((p) => p.id)).toEqual([1289, 1286]);
@@ -264,7 +264,7 @@ describe('detalhe da release', () => {
 
   it('vincular a task move o PR para o PBI dela; desfazer devolve', async () => {
     const d = deps();
-    const ref = { projectId: 'p-getnota', repositoryId: 'r-getnota-api', pullRequestId: 1274 };
+    const ref = { projectId: 'p-invoicing', repositoryId: 'r-invoicing-api', pullRequestId: 1274 };
 
     await linkWorkItem(d, 48181, ref);
     const linked = await getReleaseDetails(d, api);
@@ -276,13 +276,13 @@ describe('detalhe da release', () => {
   });
 
   it('busca tasks pelo título, com o PBI pai', async () => {
-    const found = await searchWorkItems(deps(), { projectId: 'p-getnota', term: 'dependencies' });
+    const found = await searchWorkItems(deps(), { projectId: 'p-invoicing', term: 'dependencies' });
     expect(found.map((w) => [w.id, w.parent?.id])).toEqual([
       [48181, 48180],
       [48176, 48180],
       [48152, 48150],
     ]);
-    expect(await searchWorkItems(deps(), { projectId: 'p-getnota', term: 'a' })).toEqual([]);
+    expect(await searchWorkItems(deps(), { projectId: 'p-invoicing', term: 'a' })).toEqual([]);
   });
 
   it('escolhe o termo de busca a partir do título do PR', () => {
