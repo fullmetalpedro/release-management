@@ -1,6 +1,6 @@
 # Release Management — aplicação
 
-Code review e releases de GetNota, LeadComex e Jane, seguindo o design em `../design/releaseManagement.pen`.
+Referência técnica da aplicação. Para a visão geral, as telas e o caminho do token pessoal, veja o [README da raiz](../README.md). O design fica em `../design/releaseManagement.pen`.
 Os PRs vêm do Azure DevOps ou do GitHub, e as tasks, do Azure DevOps ou do Jira. A entrada é por conta Microsoft (só Azure DevOps) ou por token pessoal de cada plataforma.
 
 ## Rodar
@@ -18,6 +18,7 @@ Abra http://localhost:5173. Sem `.env`, a entrada é por token pessoal, informad
 | `npm test` | Testes do servidor |
 | `npm run typecheck` | Tipos do servidor e do front |
 | `npm run build` e `npm start` | Build do front e API servindo tudo na porta 3001 |
+| `npm run chaos -w server` | Teste de caos contra um servidor local |
 
 Para conferir o adapter contra a organização real sem gravar nada, com `AZDO_ORG` e `AZDO_PAT` no `.env`: `cd server && npx tsx --env-file=../.env scripts/smoke-readonly.ts`.
 
