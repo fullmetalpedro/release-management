@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { AppConfig } from '../../config.ts';
@@ -29,7 +30,6 @@ import {
   type PatValidator,
 } from './patProviders.ts';
 import { PatTransport } from './patTransport.ts';
-import { RateLimiter } from './rateLimit.ts';
 import { PEDRO } from '../memory/world.ts';
 import type { PatProvider, Session, SessionStore, SourceProvider } from '../session/sessionStore.ts';
 import { localeFrom, msg, render } from '../../i18n.ts';
@@ -44,6 +44,8 @@ export interface ServerDeps {
   identityProvider?: IdentityProvider;
   webDist?: string;
   validatePat?: PatValidator;
+  // Tentativas de entrada por minuto, por IP.
+  authAttemptsPerMinute?: number;
 }
 
 const isSource = (provider: PatProvider): provider is SourceProvider => provider !== 'jira';
@@ -78,8 +80,33 @@ const CONTENT_SECURITY_POLICY = [
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const { config, sessions, registry, identityProvider } = deps;
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'warn' }, trustProxy: config.trustProxy });
   const secure = config.appUrl.startsWith('https://');
+  const secureHeaders = (reply: FastifyReply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'no-referrer');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Cross-Origin-Opener-Policy', 'same-origin');
+    reply.header('Cross-Origin-Resource-Policy', 'same-origin');
+    if (!reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+    if (secure) reply.header('Strict-Transport-Security', 'max-age=31536000');
+  };
+  const app = Fastify({
+    logger: { level: process.env.LOG_LEVEL ?? 'warn' },
+    trustProxy: config.trustProxy,
+    // As chaves de foto do Azure DevOps são descritores longos.
+    routerOptions: { maxParamLength: 500 },
+    // Uma requisição que não termina de chegar não segura a conexão para sempre.
+    requestTimeout: 30_000,
+    // URL malformada ou parâmetro longo demais são barrados antes das rotas e dos hooks: a resposta sai daqui,
+    // com os mesmos cabeçalhos e o mesmo formato das outras.
+    frameworkErrors: (error, request, rawReply) => {
+      const reply = rawReply as FastifyReply;
+      secureHeaders(reply);
+      const status = error.statusCode && error.statusCode < 500 ? error.statusCode : 400;
+      const message = render(msg('invalidRequest'), localeFrom(request.headers['accept-language']));
+      return reply.status(status).send({ code: 'invalid', message });
+    },
+  });
   await app.register(cookie, { secret: config.sessionSecret });
 
   const sessionOf = (request: FastifyRequest): Session | undefined => {
@@ -109,20 +136,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
   };
 
-  app.addHook('onSend', async (_request, reply) => {
-    reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('Referrer-Policy', 'no-referrer');
-    reply.header('X-Frame-Options', 'DENY');
-    if (!reply.hasHeader('Content-Security-Policy')) reply.header('Content-Security-Policy', CONTENT_SECURITY_POLICY);
-    if (secure) reply.header('Strict-Transport-Security', 'max-age=31536000');
-  });
+  app.addHook('onSend', async (_request, reply) => secureHeaders(reply));
 
-  // As rotas de entrada são as únicas abertas a quem não tem sessão: limite por IP.
-  const authAttempts = new RateLimiter(60, 60_000);
-  const limitAuth = (request: FastifyRequest) => {
-    const { allowed, retryAfterSeconds } = authAttempts.take(request.ip);
-    if (!allowed) throw new RateLimitedError(retryAfterSeconds);
-  };
+  // As rotas de entrada são as únicas abertas a quem não tem sessão: limite por IP, somado entre elas.
+  await app.register(rateLimit, {
+    global: false,
+    errorResponseBuilder: (_request, context) => new RateLimitedError(Math.ceil(context.ttl / 1000)),
+  });
+  const limited = { rateLimit: { max: deps.authAttemptsPerMinute ?? 60, timeWindow: 60_000, groupId: 'auth' } };
   // Outro site não consegue enviar este cabeçalho sem CORS, o que barra CSRF nas escritas.
   const requireFetchHeader = (request: FastifyRequest) => {
     if (request.headers['x-requested-with'] !== 'fetch') throw new ValidationError(msg('invalidRequest'));
@@ -186,8 +207,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const validatePat = deps.validatePat ?? createPatValidator(config);
 
     // A chave pública e um nonce de uso único para o próximo envio de token.
-    app.get('/auth/pat/key', async (request, reply) => {
-      limitAuth(request);
+    app.get('/auth/pat/key', { config: limited }, async (_request, reply) => {
       reply.header('Cache-Control', 'no-store');
       return { algorithm: 'RSA-OAEP-256+A256GCM', publicKey: transport.publicKeySpki, nonce: transport.issueNonce() };
     });
@@ -196,16 +216,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     app.post<{
       Params: { provider: string };
       Body: { organization?: unknown; site?: unknown; email?: unknown; encryptedToken?: unknown };
-    }>('/auth/pat/:provider', async (request, reply) => {
+    }>('/auth/pat/:provider', { config: limited }, async (request, reply) => {
       requireFetchHeader(request);
-      limitAuth(request);
       const provider = PAT_PROVIDERS.find((p) => p === request.params.provider);
       if (!provider) throw new NotFoundError(msg('unknownPlatform'));
       const label = PROVIDER_LABELS[provider];
       const { account, email } = parseAccount(provider, request.body ?? {});
       if (typeof request.body?.encryptedToken !== 'string') throw new ValidationError(msg('tokenRequired'));
       const token = transport.decrypt(request.body.encryptedToken).trim();
-      if (token.length < 20 || token.length > 400) throw new ValidationError(msg('tokenMalformed'));
+      // Só caracteres visíveis: o token vai num cabeçalho HTTP, onde quebra de linha e controle não cabem.
+      if (token.length < 20 || token.length > 400 || !/^[\x21-\x7E]+$/.test(token)) throw new ValidationError(msg('tokenMalformed'));
 
       let validation: PatValidation;
       try {
@@ -268,8 +288,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     });
   }
 
-  app.get('/auth/microsoft/login', async (request, reply) => {
-    limitAuth(request);
+  app.get('/auth/microsoft/login', { config: limited }, async (request, reply) => {
     if (config.demo) {
       // Quem já está na demonstração continua na mesma sessão, em vez de acumular outra a cada visita.
       if (!sessionOf(request)) {
@@ -291,8 +310,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     return reply.redirect(login.url);
   });
 
-  app.get('/auth/microsoft/callback', async (request, reply) => {
-    limitAuth(request);
+  app.get('/auth/microsoft/callback', { config: limited }, async (request, reply) => {
     const query = request.query as { code?: string; state?: string; error?: string };
     const raw = request.cookies[OAUTH_COOKIE];
     reply.clearCookie(OAUTH_COOKIE, { path: '/auth' });
@@ -485,15 +503,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // ---- Front buildado (produção) ----
 
   const webDist = deps.webDist ?? resolve(import.meta.dirname, '../../../../web/dist');
-  if (existsSync(webDist)) {
-    await app.register(fastifyStatic, { root: webDist });
-    app.setNotFoundHandler((request, reply) => {
-      if (request.url.startsWith('/api/') || request.url.startsWith('/auth/')) {
-        return reply.status(404).send({ code: 'not-found', message: say(request, 'routeNotFound') });
-      }
-      return reply.sendFile('index.html');
-    });
-  }
+  const hasWeb = existsSync(webDist);
+  if (hasWeb) await app.register(fastifyStatic, { root: webDist });
+  app.setNotFoundHandler((request, reply) => {
+    // Qualquer outro caminho é uma tela do front, que resolve a rota no navegador.
+    const isApi = request.url.startsWith('/api/') || request.url.startsWith('/auth/');
+    if (hasWeb && !isApi && request.method === 'GET') return reply.sendFile('index.html');
+    return reply.status(404).send({ code: 'not-found', message: say(request, 'routeNotFound') });
+  });
 
   return app;
 }

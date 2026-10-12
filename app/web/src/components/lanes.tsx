@@ -1,11 +1,12 @@
 import { GitBranch, GitBranchPlus, GitMerge, LoaderCircle, Maximize2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useViewNavigate } from '../lib/transition';
+import { useNavigate } from 'react-router-dom';
 import type { LanePullRequest, ReleaseLane } from '../lib/api';
 import { authorLabel, releaseMeta, shortDate } from '../lib/format';
 import { ColumnShell, QuietNote } from './board';
 import { Checkbox, cx, RepoSelect, SkeletonCard } from './ui';
 import { t } from '../lib/i18n';
+import { rem } from '../lib/units';
 
 interface Repo {
   id: string;
@@ -15,7 +16,7 @@ interface Repo {
 function PrMeta({ pr }: { pr: LanePullRequest }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="font-mono text-[11.5px] text-faint">#{pr.id}</span>
+      <span className="font-mono text-[0.71875rem] text-faint">#{pr.id}</span>
       <span className="text-xs text-[#CBD5E1]">·</span>
       <span className="truncate text-xs text-mute">{authorLabel(pr.author)}</span>
       <span className="text-xs text-[#CBD5E1]">·</span>
@@ -87,11 +88,11 @@ export function MergedColumn({
   const createPanel = (
     <div className="stroke flex flex-col gap-2.5 rounded-lg bg-white p-3.5 [--stroke:#99F6E4]">
       <div className="flex items-center justify-between">
-        <span className={cx('text-[13px] font-semibold', selected.length > 0 ? 'text-ink' : 'text-mute')}>
+        <span className={cx('text-[0.8125rem] font-semibold', selected.length > 0 ? 'text-ink' : 'text-mute')}>
           {selected.length === 0 ? t('lanes.noneSelected') : t('lanes.selected', { count: selected.length })}
         </span>
         {selected.length > 0 && !creating && (
-          <button type="button" onClick={() => update([])} className="text-[12.5px] font-medium text-[#0F766E] hover:underline">
+          <button type="button" onClick={() => update([])} className="text-[0.78125rem] font-medium text-[#0F766E] hover:underline">
             {t('lanes.clear')}
           </button>
         )}
@@ -106,17 +107,17 @@ export function MergedColumn({
             creating ? 'bg-soft' : 'bg-white',
           )}
         >
-          <GitBranch size={13} className="shrink-0 text-mute" />
+          <GitBranch size={rem(13)} className="shrink-0 text-mute" />
           <input
             id="release-branch"
             value={branch}
             onChange={(event) => setBranch(event.target.value)}
             readOnly={creating}
             spellCheck={false}
-            className="min-w-0 flex-1 bg-transparent font-mono text-[12.5px] font-medium text-ink outline-none"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[0.78125rem] font-medium text-ink outline-none"
           />
         </div>
-        <p className="text-[11.5px] leading-[1.4] text-faint">
+        <p className="text-[0.71875rem] leading-[1.4] text-faint">
           {t('lanes.fromBase', { base: lane?.baseBranch ?? 'main' })}
         </p>
       </div>
@@ -125,7 +126,7 @@ export function MergedColumn({
         disabled={!canCreate}
         onClick={() => onCreate(branch.trim(), selected)}
         className={cx(
-          'grid rounded-lg px-3.5 py-[9px] text-[13px] font-semibold',
+          'grid rounded-lg px-3.5 py-[0.5625rem] text-[0.8125rem] font-semibold',
           creating
             ? 'bg-ink-2 text-[#CBD5E1]'
             : canCreate
@@ -135,11 +136,11 @@ export function MergedColumn({
       >
         {/* Os dois rótulos ocupam o mesmo lugar: o botão fica do tamanho do maior e a coluna não muda de altura. */}
         <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-2', creating && 'invisible')}>
-          <GitBranchPlus size={14} className="shrink-0" />
+          <GitBranchPlus size={rem(14)} className="shrink-0" />
           {t('lanes.create')}
         </span>
         <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-2', !creating && 'invisible')}>
-          <LoaderCircle size={14} className="shrink-0 animate-spin" />
+          <LoaderCircle size={rem(14)} className="shrink-0 animate-spin" />
           {t('lanes.creating')}
         </span>
       </button>
@@ -172,7 +173,7 @@ export function MergedColumn({
             disabled={creating || merged.length === 0}
             onChange={() => update(allSelected ? [] : merged.map((pr) => pr.id))}
           />
-          <span className="text-[12.5px] font-medium text-ink-2">{t('lanes.selectAll')}</span>
+          <span className="text-[0.78125rem] font-medium text-ink-2">{t('lanes.selectAll')}</span>
         </div>
         {merged.map((pr, index) => {
           const isSelected = selected.includes(pr.id);
@@ -202,7 +203,7 @@ export function MergedColumn({
                 />
               </span>
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <p className="text-[13px] font-medium leading-[1.35] text-ink">{pr.title}</p>
+                <p className="text-[0.8125rem] font-medium leading-[1.35] text-ink">{pr.title}</p>
                 <PrMeta pr={pr} />
               </div>
             </div>
@@ -237,7 +238,7 @@ export function ReleaseColumn({
   highlight: boolean;
   now: number;
 }) {
-  const viewNavigate = useViewNavigate();
+  const navigate = useNavigate();
   const releaseUrl = repositoryId ? `/release?repo=${encodeURIComponent(repositoryId)}` : '/release';
   const expand = (
     <a
@@ -246,13 +247,13 @@ export function ReleaseColumn({
         // Clique simples troca de tela com fade; com Ctrl/meio, o link abre em outra aba.
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
         event.preventDefault();
-        viewNavigate(releaseUrl);
+        void navigate(releaseUrl, { viewTransition: true });
       }}
       aria-label={t('lanes.openFullscreen')}
       title={t('lanes.openFullscreen')}
-      className="stroke flex h-[26px] w-[26px] items-center justify-center rounded-md bg-white [--stroke:#DDD6FE] hover:bg-[#EDE9FE] hover:[--stroke:#C4B5FD]"
+      className="stroke flex h-[1.625rem] w-[1.625rem] items-center justify-center rounded-md bg-white [--stroke:#DDD6FE] hover:bg-[#EDE9FE] hover:[--stroke:#C4B5FD]"
     >
-      <Maximize2 size={13} className="text-[#7C3AED]" />
+      <Maximize2 size={rem(13)} className="text-[#7C3AED]" />
     </a>
   );
 
@@ -275,10 +276,10 @@ export function ReleaseColumn({
           <div className="stroke flex flex-col gap-2 rounded-lg bg-white p-3.5">
             <div className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-1.5">
-                <GitBranch size={14} className="shrink-0 text-[#7C3AED]" />
+                <GitBranch size={rem(14)} className="shrink-0 text-[#7C3AED]" />
                 <span className="truncate font-mono text-sm font-semibold text-ink">{release.name}</span>
               </div>
-              <span className="shrink-0 rounded bg-[#EDE9FE] px-[7px] py-0.5 text-[11px] font-semibold text-[#6D28D9]">
+              <span className="shrink-0 rounded bg-[#EDE9FE] px-[0.4375rem] py-0.5 text-[0.6875rem] font-semibold text-[#6D28D9]">
                 {t('common.latest')}
               </span>
             </div>
@@ -291,9 +292,9 @@ export function ReleaseColumn({
                   key={pr.id}
                   className={cx('flex gap-2.5 px-3.5 py-3', index < release.pullRequests.length - 1 && 'border-b border-line-soft')}
                 >
-                  <GitMerge size={14} className="shrink-0 text-[#8B5CF6]" />
+                  <GitMerge size={rem(14)} className="shrink-0 text-[#8B5CF6]" />
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <p className="text-[13px] font-medium leading-[1.35] text-ink">{pr.title}</p>
+                    <p className="text-[0.8125rem] font-medium leading-[1.35] text-ink">{pr.title}</p>
                     <PrMeta pr={pr} />
                   </div>
                 </div>

@@ -23,6 +23,8 @@ export interface PullRequestCard {
   approvals: number;
   reviewers: number;
   approved: boolean;
+  // Ninguém foi chamado para revisar: o card avisa, em vez de mostrar a contagem de votos.
+  noReviewers: boolean;
   reason?: DependsOnMeReason;
   // Sou revisor obrigatório deste PR (e não apenas opcional).
   requiredReviewer: boolean;
@@ -84,6 +86,7 @@ export function toCard(pr: PullRequest, me: Person, reason?: DependsOnMeReason):
     approvals: pr.reviews.filter((r) => r.decision === 'approved').length,
     reviewers: requiredApprovals(pr),
     approved: isApproved(pr),
+    noReviewers: pr.reviews.length === 0,
     reason,
     requiredReviewer: pr.reviews.some((r) => r.reviewer.id === me.id && r.required),
     webUrl: pr.webUrl,

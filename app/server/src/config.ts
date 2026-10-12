@@ -55,6 +55,12 @@ function firstRelease(value: string | undefined): string {
   return name;
 }
 
+function port(value: string | undefined): number {
+  const number = Number(value ?? 3001);
+  if (!Number.isInteger(number) || number < 0 || number > 65535) throw new Error(`API_PORT não é uma porta válida: ${value}`);
+  return number;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const appUrl = (env.APP_URL ?? 'http://localhost:5173').replace(/\/$/, '');
   // Modo de demonstração só quando pedido: dados em memória, sem provedor nenhum.
@@ -62,7 +68,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const dataDir = resolve(env.DATA_DIR ?? '.data');
 
   const base = {
-    port: Number(env.API_PORT ?? 3001),
+    port: port(env.API_PORT),
     host: env.API_HOST ?? '127.0.0.1',
     trustProxy: env.TRUST_PROXY === 'true',
     appUrl,

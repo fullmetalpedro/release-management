@@ -5,8 +5,9 @@ import { api, type Me, type ProviderId } from '../lib/api';
 import { useSession } from '../lib/session';
 import { AzureDevOpsLogo, GitHubLogo, JiraLogo } from './logos';
 import { useToast } from './toast';
-import { Avatar, cx, useDropdown } from './ui';
+import { Avatar, cx, Menu, MENU_ITEM_DARK, MenuContent, MenuItem, MenuTrigger } from './ui';
 import { t } from '../lib/i18n';
+import { rem } from '../lib/units';
 
 const PROVIDERS: Record<ProviderId, { name: string; logo: React.ReactNode }> = {
   'azure-devops': { name: 'Azure DevOps', logo: <AzureDevOpsLogo size={16} /> },
@@ -14,7 +15,7 @@ const PROVIDERS: Record<ProviderId, { name: string; logo: React.ReactNode }> = {
   jira: { name: 'Jira', logo: <JiraLogo size={16} /> },
 };
 
-function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
+function AccountMenu({ me }: { me: Me }) {
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -22,7 +23,6 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
 
   // Troca a plataforma que fornece os PRs; tudo que estava em cache era da anterior.
   const activate = async (provider: ProviderId) => {
-    onClose();
     try {
       await api.setActiveSource(provider);
       // A sessão é recarregada sem ser zerada (zerar desmontaria a tela); o resto recomeça do zero.
@@ -45,55 +45,33 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
     navigate('/login', { replace: true });
   };
 
+  const ROW = 'flex h-12 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-left';
   return (
-    <div
-      role="menu"
-      className="pop-in absolute right-0 top-full z-40 mt-[19px] flex w-80 flex-col gap-0.5 rounded-[10px] bg-[#2A2D33] p-1.5 shadow-[0_10px_28px_#0F172A40]"
-    >
+    <MenuContent tone="dark" align="end" width={320} offset={18}>
       <div className="flex items-center gap-3 px-2.5 pb-3 pt-2.5">
         <Avatar name={me.user.name} isMe avatarKey={me.user.avatarKey} size={36} />
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate text-[13px] font-semibold text-white">{me.user.name}</span>
+          <span className="truncate text-[0.8125rem] font-semibold text-white">{me.user.name}</span>
           <span className="text-xs text-[#8B919A]">
             {me.mode === 'pat' ? t('account.personalToken') : t('account.viaMicrosoft')}{active && me.mode === 'pat' ? ` · ${PROVIDERS[active.provider].name}` : ''}
           </span>
         </div>
       </div>
-      <div className="h-px bg-[#3A3F48]" />
-      <div className="px-2.5 pb-1.5 pt-2.5 text-[11px] font-semibold tracking-[0.6px] text-[#8B919A]">{t('account.accounts')}</div>
+      <div className="h-px shrink-0 bg-[#3A3F48]" />
+      <div className="px-2.5 pb-1.5 pt-2.5 text-[0.6875rem] font-semibold tracking-[0.6px] text-[#8B919A]">{t('account.accounts')}</div>
       {me.accounts.map((account) => {
         const provider = PROVIDERS[account.provider];
         const switchable = me.mode === 'pat' && account.connected && !account.active && account.provider !== 'jira';
-        const Row = switchable ? 'button' : 'div';
-        return (
-          <Row
-            key={account.provider}
-            {...(switchable
-              ? { type: 'button', role: 'menuitem', title: t('account.showPrsFrom', { provider: provider.name }), onClick: () => void activate(account.provider) }
-              : {})}
-            className={cx(
-              'flex h-12 items-center gap-2.5 rounded-md px-2.5 text-left',
-              account.active && 'bg-[#3A3F48]',
-              switchable && 'hover-dark',
-            )}
-          >
-            <span
-              className={cx(
-                'flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-white',
-                !account.connected && 'opacity-45',
-              )}
-            >
+        const content = (
+          <>
+            <span className={cx('flex h-7 w-7 shrink-0 items-center justify-center rounded-[0.4375rem] bg-white', !account.connected && 'opacity-45')}>
               {provider.logo}
             </span>
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span
                 className={cx(
-                  'text-[13px]',
-                  account.active
-                    ? 'font-semibold text-white'
-                    : account.connected
-                      ? 'font-medium text-[#D1D5DB]'
-                      : 'font-medium text-[#8B919A]',
+                  'text-[0.8125rem]',
+                  account.active ? 'font-semibold text-white' : account.connected ? 'font-medium text-[#D1D5DB]' : 'font-medium text-[#8B919A]',
                 )}
               >
                 {provider.name}
@@ -102,65 +80,66 @@ function AccountDropdown({ me, onClose }: { me: Me; onClose: () => void }) {
                 {account.connected ? account.handle : t('account.noAccount')}
               </span>
             </div>
-            {account.active && <Check size={14} className="shrink-0 text-white" />}
+            {account.active && <Check size={rem(14)} className="shrink-0 text-white" />}
             {!account.connected && (
-              <button
-                type="button"
-                className="stroke flex h-[26px] shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-[#D1D5DB] [--stroke:#4B515B] hover-dark"
-                onClick={() => {
-                  onClose();
-                  // No modo PAT, conectar e trocar tokens acontece na tela de plataformas.
-                  if (me.mode === 'pat') return navigate('/login');
-                  toast.show({
-                    kind: 'error',
-                    title: t('account.unavailable', { provider: provider.name }),
-                    description: t('account.unavailableBody'),
-                  });
-                }}
-              >
+              <span className="stroke flex h-[1.625rem] shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-[#D1D5DB] [--stroke:#4B515B]">
                 {t('account.connect')}
-              </button>
+              </span>
             )}
-          </Row>
+          </>
+        );
+        // A conta ativa (e o Jira, que não fornece PRs) só informa; as outras linhas são ações do menu.
+        if (account.connected && !switchable) {
+          return (
+            <div key={account.provider} className={cx(ROW, account.active && 'bg-[#3A3F48]')}>
+              {content}
+            </div>
+          );
+        }
+        return (
+          <MenuItem
+            key={account.provider}
+            title={switchable ? t('account.showPrsFrom', { provider: provider.name }) : undefined}
+            onSelect={() => {
+              if (switchable) return void activate(account.provider);
+              // No modo PAT, conectar e trocar tokens acontece na tela de plataformas.
+              if (me.mode === 'pat') return navigate('/login');
+              toast.show({
+                kind: 'error',
+                title: t('account.unavailable', { provider: provider.name }),
+                description: t('account.unavailableBody'),
+              });
+            }}
+            className={cx(ROW, MENU_ITEM_DARK)}
+          >
+            {content}
+          </MenuItem>
         );
       })}
-      <div className="h-px bg-[#3A3F48]" />
-      <button
-        type="button"
-        role="menuitem"
-        onClick={logout}
-        className="hover-dark flex h-9 items-center gap-2.5 rounded-md px-2.5 text-left"
-      >
-        <LogOut size={16} className="text-[#8B919A]" />
-        <span className="text-[13px] font-medium text-[#D1D5DB]">{t('account.signOut')}</span>
-      </button>
-    </div>
+      <div className="h-px shrink-0 bg-[#3A3F48]" />
+      <MenuItem onSelect={() => void logout()} className={cx('flex h-9 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-left', MENU_ITEM_DARK)}>
+        <LogOut size={rem(16)} className="text-[#8B919A]" />
+        <span className="text-[0.8125rem] font-medium text-[#D1D5DB]">{t('account.signOut')}</span>
+      </MenuItem>
+    </MenuContent>
   );
 }
 
 export function TopBar() {
   const { me } = useSession();
-  const { open, setOpen, ref } = useDropdown();
   return (
     <header
       className="relative z-40 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-line bg-white px-8"
       // O cabeçalho é o mesmo nas duas telas, então fica parado enquanto o conteúdo troca com fade.
       style={{ viewTransitionName: 'top-bar' }}
     >
-      <span className="whitespace-nowrap text-[21px] font-bold tracking-[-0.3px] text-ink">Release Management</span>
-      <div ref={ref} className="relative flex items-center">
-        <button
-          type="button"
-          aria-label={t('account.menu')}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          className={cx('rounded-full', open && 'stroke-focus')}
-        >
+      <span className="whitespace-nowrap text-[1.3125rem] font-bold tracking-[-0.3px] text-ink">Release Management</span>
+      <Menu>
+        <MenuTrigger aria-label={t('account.menu')} className="rounded-full data-[state=open]:stroke-focus">
           <Avatar name={me.user.name} isMe avatarKey={me.user.avatarKey} size={30} />
-        </button>
-        {open && <AccountDropdown me={me} onClose={() => setOpen(false)} />}
-      </div>
+        </MenuTrigger>
+        <AccountMenu me={me} />
+      </Menu>
     </header>
   );
 }

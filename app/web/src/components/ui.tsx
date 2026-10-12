@@ -1,7 +1,9 @@
 import { Check, ChevronDown, FolderGit2, Minus } from 'lucide-react';
+import { DropdownMenu } from 'radix-ui';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { initials } from '../lib/format';
 import { t } from '../lib/i18n';
+import { rem } from '../lib/units';
 
 export function cx(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(' ');
@@ -21,7 +23,7 @@ export function Avatar({
 }) {
   const [failedKey, setFailedKey] = useState<string>();
   const [loadedKey, setLoadedKey] = useState<string>();
-  const fontSize = size === 22 ? 'text-[9.5px]' : size === 30 ? 'text-[11px]' : 'text-[13px]';
+  const fontSize = size === 22 ? 'text-[0.59375rem]' : size === 30 ? 'text-[0.6875rem]' : 'text-[0.8125rem]';
   const showPhoto = !!avatarKey && failedKey !== avatarKey;
   return (
     <span
@@ -30,7 +32,7 @@ export function Avatar({
         fontSize,
         isMe ? 'bg-[#DBEAFE] text-[#1E40AF]' : 'bg-[#E0E7FF] text-[#3730A3]',
       )}
-      style={{ width: size, height: size }}
+      style={{ width: rem(size), height: rem(size) }}
       aria-hidden
     >
       {initials(name)}
@@ -78,109 +80,133 @@ export function Checkbox({
         onChange?.();
       }}
       className={cx(
-        'stroke flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px]',
+        'stroke flex h-4 w-4 shrink-0 items-center justify-center rounded-[0.25rem]',
         filled ? 'bg-ink [--stroke:#0F172A]' : 'bg-white [--stroke:#CBD5E1]',
       )}
     >
-      {state === 'on' && <Check size={11} className="text-white" />}
-      {state === 'partial' && <Minus size={11} className="text-white" />}
+      {state === 'on' && <Check size={rem(11)} className="text-white" />}
+      {state === 'partial' && <Minus size={rem(11)} className="text-white" />}
     </button>
   );
 }
 
-// Abre/fecha um menu ancorado; fecha com Esc, com clique fora ou quando o foco sai dele pelo teclado.
-export function useDropdown<T extends HTMLElement = HTMLDivElement>() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<T>(null);
-  // Conteúdo do menu renderizado fora do gatilho (portal): clicar nele não fecha o menu.
-  const portalRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const inside = (target: EventTarget | null) =>
-      target instanceof Node && (!!ref.current?.contains(target) || !!portalRef.current?.contains(target));
-    const onPointer = (event: PointerEvent) => {
-      if (!inside(event.target)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      // O item em foco some junto com o menu; o foco volta para o botão que o abriu, em vez de se perder.
-      if (inside(document.activeElement)) ref.current?.querySelector<HTMLElement>('button, [href], [tabindex]')?.focus();
-      setOpen(false);
-    };
-    const onFocus = (event: FocusEvent) => {
-      if (!inside(event.target)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointer);
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('focusin', onFocus);
-    return () => {
-      document.removeEventListener('pointerdown', onPointer);
-      document.removeEventListener('keydown', onKey);
-      document.removeEventListener('focusin', onFocus);
-    };
-  }, [open]);
-  return { open, setOpen, ref, portalRef };
-}
+// Menus suspensos: comportamento do Radix (teclado, foco, fechar com Esc ou clique fora, não sair da janela) com o
+// visual do sistema.
+export const Menu = ({ children, ...props }: DropdownMenu.DropdownMenuProps) => (
+  <DropdownMenu.Root modal={false} {...props}>
+    {children}
+  </DropdownMenu.Root>
+);
 
-export function LightMenu({
+// O gatilho recebe data-state="open" enquanto o menu está aberto; `group` deixa os filhos reagirem a isso.
+export const MenuTrigger = ({ className, ...props }: DropdownMenu.DropdownMenuTriggerProps) => (
+  <DropdownMenu.Trigger className={cx('group', className)} {...props} />
+);
+
+const MENU_TONES = {
+  light: 'stroke bg-white shadow-[0_0.5rem_1.5rem_#0F172A1F]',
+  dark: 'bg-[#2A2D33] shadow-[0_0.625rem_1.75rem_#0F172A40]',
+};
+
+export function MenuContent({
   title,
-  align = 'left',
+  align = 'start',
   width = 260,
+  tone = 'light',
+  offset = 8,
+  className,
   children,
-}: {
+  ...props
+}: Omit<DropdownMenu.DropdownMenuContentProps, 'title'> & {
   title?: string;
-  align?: 'left' | 'right';
+  // Largura em px do design, ou a mesma do gatilho.
   width?: number | 'anchor';
-  children: ReactNode;
+  tone?: keyof typeof MENU_TONES;
+  offset?: number;
 }) {
   return (
-    <div
-      role="menu"
-      className={cx(
-        'stroke pop-in absolute top-full z-30 mt-2 flex max-h-[320px] flex-col overflow-y-auto rounded-[10px] bg-white p-1.5 shadow-[0_8px_24px_#0F172A1F]',
-        align === 'left' ? 'left-0' : 'right-0',
-        width === 'anchor' && 'w-full',
-      )}
-      style={width === 'anchor' ? undefined : { width }}
-    >
-      {title && (
-        <div className="px-2.5 pb-1.5 pt-2 text-[11px] font-semibold tracking-[0.5px] text-faint">{title}</div>
-      )}
-      {children}
-    </div>
+    <DropdownMenu.Portal>
+      <DropdownMenu.Content
+        align={align}
+        sideOffset={offset}
+        collisionPadding={8}
+        className={cx(
+          'pop-in z-40 flex max-h-[min(20rem,var(--radix-dropdown-menu-content-available-height))] flex-col gap-0.5 overflow-y-auto rounded-[0.625rem] p-1.5 outline-none',
+          MENU_TONES[tone],
+          width === 'anchor' && 'w-[var(--radix-dropdown-menu-trigger-width)]',
+          className,
+        )}
+        style={width === 'anchor' ? undefined : { width: rem(width) }}
+        {...props}
+      >
+        {title && (
+          <DropdownMenu.Label
+            className={cx(
+              'px-2.5 pb-1.5 pt-2 text-[0.6875rem] font-semibold',
+              tone === 'light' ? 'tracking-[0.5px] text-faint' : 'tracking-[0.6px] text-[#8B919A]',
+            )}
+          >
+            {title}
+          </DropdownMenu.Label>
+        )}
+        {children}
+      </DropdownMenu.Content>
+    </DropdownMenu.Portal>
   );
 }
 
+// Item em foco pelo teclado ou sob o ponteiro: o Radix marca com data-highlighted.
+export const MENU_ITEM_LIGHT = 'cursor-default outline-none data-[highlighted]:bg-[var(--color-hover)]';
+export const MENU_ITEM_DARK = 'cursor-default outline-none data-[highlighted]:bg-[var(--color-hover-dark)]';
+
+// Opção de escolha única. Fica dentro de um <MenuRadioGroup>.
 export function MenuOption({
+  value,
   selected,
-  onSelect,
   mono,
   leading,
   children,
 }: {
+  value: string;
   selected: boolean;
-  onSelect: () => void;
   mono?: boolean;
   // Elemento antes do texto, como a foto de uma pessoa.
   leading?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      role="menuitemradio"
-      aria-checked={selected}
-      onClick={onSelect}
+    <DropdownMenu.RadioItem
+      value={value}
       className={cx(
-        'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-medium text-ink hover-row',
+        'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[0.8125rem] font-medium text-ink',
+        MENU_ITEM_LIGHT,
         selected && 'bg-soft',
-        mono && 'font-mono text-[12.5px]',
+        mono && 'font-mono text-[0.78125rem]',
       )}
     >
       {leading}
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {selected && <Check size={14} className="shrink-0 text-ink-2" />}
-    </button>
+      {selected && <Check size={rem(14)} className="shrink-0 text-ink-2" />}
+    </DropdownMenu.RadioItem>
+  );
+}
+
+export const MenuRadioGroup = DropdownMenu.RadioGroup;
+export const MenuItem = DropdownMenu.Item;
+export const MenuCheckboxItem = DropdownMenu.CheckboxItem;
+
+// A caixa de seleção só desenhada, para dentro de um item que já é o controle.
+export function CheckMark({ checked }: { checked: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cx(
+        'stroke flex h-4 w-4 shrink-0 items-center justify-center rounded-[0.25rem]',
+        checked ? 'bg-ink [--stroke:#0F172A]' : 'bg-white [--stroke:#CBD5E1]',
+      )}
+    >
+      {checked && <Check size={rem(11)} className="text-white" />}
+    </span>
   );
 }
 
@@ -199,45 +225,33 @@ export function RepoSelect({
   disabled?: boolean;
   className?: string;
 }) {
-  const { open, setOpen, ref } = useDropdown();
   const current = repositories.find((r) => r.id === value);
   return (
-    <div ref={ref} className={cx('relative', className)}>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
+    <Menu>
+      <MenuTrigger
         disabled={disabled}
-        onClick={() => setOpen(!open)}
         className={cx(
-          'stroke hover-row flex w-full items-center gap-2 rounded-lg bg-white px-2.5 py-2 text-left',
-          open ? 'stroke-focus' : tone === 'violet' ? '[--stroke:#C4B5FD]' : '[--stroke:#E4E7EC]',
+          'stroke hover-row flex w-full items-center gap-2 rounded-lg bg-white px-2.5 py-2 text-left data-[state=open]:stroke-focus',
+          tone === 'violet' ? '[--stroke:#C4B5FD]' : '[--stroke:#E4E7EC]',
+          className,
         )}
       >
-        <FolderGit2 size={14} className={tone === 'violet' ? 'text-[#7C3AED]' : 'text-[#0F766E]'} />
-        <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] font-medium text-ink">
+        <FolderGit2 size={rem(14)} className={tone === 'violet' ? 'text-[#7C3AED]' : 'text-[#0F766E]'} />
+        <span className="min-w-0 flex-1 truncate font-mono text-[0.78125rem] font-medium text-ink" title={current?.name}>
           {current?.name ?? t('lanes.selectRepository')}
         </span>
-        <ChevronDown size={14} className={cx('text-faint transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <LightMenu width="anchor">
+        <ChevronDown size={rem(14)} className="text-faint transition-transform group-data-[state=open]:rotate-180" />
+      </MenuTrigger>
+      <MenuContent width="anchor">
+        <MenuRadioGroup value={value} onValueChange={onChange}>
           {repositories.map((repository) => (
-            <MenuOption
-              key={repository.id}
-              mono
-              selected={repository.id === value}
-              onSelect={() => {
-                onChange(repository.id);
-                setOpen(false);
-              }}
-            >
+            <MenuOption key={repository.id} value={repository.id} mono selected={repository.id === value}>
               {repository.name}
             </MenuOption>
           ))}
-        </LightMenu>
-      )}
-    </div>
+        </MenuRadioGroup>
+      </MenuContent>
+    </Menu>
   );
 }
 
@@ -248,16 +262,16 @@ export function Dot({ color }: { color: string }) {
 export function SkeletonCard() {
   return (
     <div className="stroke flex flex-col gap-3 rounded-lg bg-white p-3.5" aria-hidden>
-      <div className="skeleton h-2.5 w-[110px] rounded-[5px]" />
-      <div className="skeleton h-3.5 w-full rounded-[7px]" />
-      <div className="skeleton h-3.5 w-[170px] max-w-full rounded-[7px]" />
-      <div className="skeleton h-3 w-[90px] rounded-md" />
+      <div className="skeleton h-2.5 w-[6.875rem] rounded-[0.3125rem]" />
+      <div className="skeleton h-3.5 w-full rounded-[0.4375rem]" />
+      <div className="skeleton h-3.5 w-[10.625rem] max-w-full rounded-[0.4375rem]" />
+      <div className="skeleton h-3 w-[5.625rem] rounded-md" />
       <div className="flex items-center justify-between pt-1.5">
         <div className="flex items-center gap-2">
-          <div className="skeleton h-[22px] w-[22px] rounded-full" />
-          <div className="skeleton h-2.5 w-20 rounded-[5px]" />
+          <div className="skeleton h-[1.375rem] w-[1.375rem] rounded-full" />
+          <div className="skeleton h-2.5 w-20 rounded-[0.3125rem]" />
         </div>
-        <div className="skeleton h-2.5 w-16 rounded-[5px]" />
+        <div className="skeleton h-2.5 w-16 rounded-[0.3125rem]" />
       </div>
     </div>
   );

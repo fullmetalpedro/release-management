@@ -46,19 +46,22 @@
     height: 100%;
   }
 
-  /* A interface inteira é desenhada a 90%: as seis colunas cabem na largura de um notebook comum sem rolagem
-     horizontal. As alturas vêm em porcentagem desde a raiz, porque 100vh não acompanharia o zoom. */
+  /* A interface inteira é desenhada a 90% do design: as seis colunas cabem na largura de um notebook comum sem
+     rolagem horizontal. Todas as medidas estão em rem (px do design ÷ 16), então é a raiz que define a escala:
+     1rem = 14,4px. Não há zoom: posições e medidas lidas pelo JavaScript são as da janela. */
+  html {
+    font-size: 90%;
+  }
+
   #root {
-    zoom: var(--ui-zoom);
     height: 100%;
   }
 
   body {
-    --ui-zoom: 0.9;
     background: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   button {
@@ -179,7 +182,7 @@
 @keyframes pop-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-0.25rem);
   }
 }
 
@@ -191,7 +194,7 @@
 @keyframes pop-in-up {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(0.25rem);
   }
 }
 
@@ -203,7 +206,7 @@
 @keyframes fade-up {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(0.25rem);
   }
 }
 
@@ -263,4 +266,40 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+
+  /* A troca de tela também fica sem fade. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+/* Seletor de cor personalizada (react-colorful) com as medidas do design. */
+.repo-color-picker.react-colorful {
+  width: 100%;
+  height: auto;
+  gap: 0.625rem;
+}
+
+.repo-color-picker .react-colorful__saturation {
+  height: 7.5rem;
+  border-bottom: 0;
+  border-radius: 0.375rem;
+}
+
+.repo-color-picker .react-colorful__hue {
+  height: 0.625rem;
+  border-radius: 0.3125rem;
+}
+
+.repo-color-picker .react-colorful__pointer {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-width: 2px;
+  box-shadow: 0 1px 0.1875rem #0f172a66;
+}
+
+.repo-color-picker .react-colorful__hue-pointer {
+  width: 0.875rem;
+  height: 0.875rem;
 }

@@ -1,4 +1,4 @@
-import { mapLimit } from '../concurrency.ts';
+import { mapLimit, withLock } from '../concurrency.ts';
 import { NotFoundError, ProviderUnavailableError, ValidationError } from '../domain/errors.ts';
 import type { Person, PullRequest, ReleaseBranch, Repository } from '../domain/types.ts';
 import type { SourceControl } from '../ports/sourceControl.ts';
@@ -213,6 +213,20 @@ export async function createRelease(
   if (ids.length === 0) throw new ValidationError(msg('selectAtLeastOnePr'));
 
   const repository = await findRepository(sourceControl, input.projectId, input.repositoryId);
+  // Uma criação por vez em cada repositório: dois pedidos simultâneos com o mesmo nome passariam juntos pela
+  // verificação de "já existe" e os dois tentariam criar a branch.
+  return withLock(`release:${repository.projectId}/${repository.id}`, () =>
+    createInRepository(sourceControl, repository, name, ids, input.branching),
+  );
+}
+
+async function createInRepository(
+  sourceControl: SourceControl,
+  repository: Repository,
+  name: string,
+  ids: number[],
+  branching: BranchingConfig,
+): Promise<{ name: string; pullRequests: number; repository: string; webUrl: string }> {
   const existing = await sourceControl.listReleaseBranches(repository);
   if (existing.some((b) => b.name === name)) throw new ValidationError(msg('branchExists', { branch: name }));
 
@@ -226,7 +240,7 @@ export async function createRelease(
   const branch = await sourceControl.createReleaseBranch({
     repository,
     name,
-    baseBranch: await resolveBaseBranch(sourceControl, repository, input.branching),
+    baseBranch: await resolveBaseBranch(sourceControl, repository, branching),
     pullRequestIds: ordered.map((pr) => pr.id),
   });
   return { name: branch.name, pullRequests: ordered.length, repository: repository.name, webUrl: branch.webUrl };

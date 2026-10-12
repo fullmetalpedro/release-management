@@ -1,8 +1,9 @@
+import { rem } from '../lib/units';
 // Geometrias exatas do arquivo de design.
 
 function Logo({ d, fill, size }: { d: string; fill: string; size: number }) {
   return (
-    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden className="shrink-0">
+    <svg viewBox="0 0 24 24" width={rem(size)} height={rem(size)} aria-hidden className="shrink-0">
       <path d={d} fill={fill} />
     </svg>
   );
@@ -41,10 +42,10 @@ export function JiraLogo({ size = 20 }: { size?: number }) {
 export function MicrosoftLogo() {
   return (
     <span className="relative block h-5 w-5 shrink-0" aria-hidden>
-      <span className="absolute left-0 top-0 h-[9.5px] w-[9.5px] bg-[#F25022]" />
-      <span className="absolute left-[10.5px] top-0 h-[9.5px] w-[9.5px] bg-[#7FBA00]" />
-      <span className="absolute left-0 top-[10.5px] h-[9.5px] w-[9.5px] bg-[#00A4EF]" />
-      <span className="absolute left-[10.5px] top-[10.5px] h-[9.5px] w-[9.5px] bg-[#FFB900]" />
+      <span className="absolute left-0 top-0 h-[0.59375rem] w-[0.59375rem] bg-[#F25022]" />
+      <span className="absolute left-[0.65625rem] top-0 h-[0.59375rem] w-[0.59375rem] bg-[#7FBA00]" />
+      <span className="absolute left-0 top-[0.65625rem] h-[0.59375rem] w-[0.59375rem] bg-[#00A4EF]" />
+      <span className="absolute left-[0.65625rem] top-[0.65625rem] h-[0.59375rem] w-[0.59375rem] bg-[#FFB900]" />
     </span>
   );
 }

@@ -9,13 +9,15 @@ import {
   MessageSquare,
   UserCheck,
   Users,
+  UserX,
   type LucideIcon,
 } from 'lucide-react';
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { PullRequestCard } from '../lib/api';
 import { age, authorLabel } from '../lib/format';
 import { Avatar, cx, Dot, SkeletonCard } from './ui';
 import { t } from '../lib/i18n';
+import { rem } from '../lib/units';
 
 export type ColumnId = 'dependsOnMe' | 'review' | 'conflict' | 'ready' | 'merged' | 'release';
 
@@ -40,19 +42,24 @@ export const COLUMNS = [
   column('release', '#8B5CF6'),
 ];
 
-export function PrCard({ pr, now }: { pr: PullRequestCard; now: number }) {
+// `color` é a cor que o usuário deu ao repositório: vira a borda do card, para reconhecer de longe de onde é o PR.
+export function PrCard({ pr, now, color }: { pr: PullRequestCard; now: number; color?: string }) {
   return (
     <a
       href={pr.webUrl}
       target="_blank"
       rel="noreferrer"
-      className="stroke fade-up flex flex-col gap-2.5 rounded-lg bg-white p-3.5 hover:shadow-[0_6px_16px_#0F172A1A] hover:[--stroke:#94A3B8]"
+      className={cx(
+        'stroke fade-up flex flex-col gap-2.5 rounded-lg bg-white p-3.5 hover:shadow-[0_0.375rem_1rem_#0F172A1A]',
+        !color && 'hover:[--stroke:#94A3B8]',
+      )}
+      style={color ? ({ '--stroke': color, outlineWidth: 1.5, outlineOffset: -0.75 } as CSSProperties) : undefined}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <GitPullRequest size={13} className="shrink-0 text-faint" />
-          <span className="truncate font-mono text-[11.5px] text-mute">{pr.repository.name}</span>
-          <span className="font-mono text-[11.5px] text-faint">#{pr.id}</span>
+          <GitPullRequest size={rem(13)} className="shrink-0 text-faint" />
+          <span className="truncate font-mono text-[0.71875rem] text-mute">{pr.repository.name}</span>
+          <span className="font-mono text-[0.71875rem] text-faint">#{pr.id}</span>
         </div>
         <span className="shrink-0 text-xs text-faint">{age(pr.createdAt, now)}</span>
       </div>
@@ -61,21 +68,21 @@ export function PrCard({ pr, now }: { pr: PullRequestCard; now: number }) {
 
       {pr.reason === 'reviewer' && (
         <span className="flex items-center gap-1.5 self-start rounded bg-[#FEF3C7] px-2 py-1">
-          <Eye size={12} className="text-[#B45309]" />
+          <Eye size={rem(12)} className="text-[#B45309]" />
           <span className="text-xs font-medium text-[#92400E]">{t('card.reviewer')}</span>
         </span>
       )}
       {pr.reason === 'waiting-author' && (
         <span className="flex items-center gap-1.5 self-start rounded bg-[#FFEDD5] px-2 py-1">
-          <CornerUpLeft size={12} className="text-[#C2410C]" />
+          <CornerUpLeft size={rem(12)} className="text-[#C2410C]" />
           <span className="text-xs font-medium text-[#9A3412]">{t('card.waitingAuthor')}</span>
         </span>
       )}
 
       <div className="flex items-center gap-1.5">
-        <GitMerge size={13} className="shrink-0 text-faint" />
+        <GitMerge size={rem(13)} className="shrink-0 text-faint" />
         <span className="text-xs text-mute">{t('card.into')}</span>
-        <span className="truncate rounded bg-[#F1F5F9] px-1.5 py-0.5 font-mono text-[11.5px] font-medium text-ink-2">
+        <span className="truncate rounded bg-[#F1F5F9] px-1.5 py-0.5 font-mono text-[0.71875rem] font-medium text-ink-2">
           {pr.targetBranch}
         </span>
       </div>
@@ -90,22 +97,30 @@ export function PrCard({ pr, now }: { pr: PullRequestCard; now: number }) {
         <div className="flex shrink-0 items-center gap-2.5">
           {pr.commentCount > 0 && (
             <span className="flex items-center gap-1" title={t('card.comments')}>
-              <MessageSquare size={13} className="text-mute" />
+              <MessageSquare size={rem(13)} className="text-mute" />
               <span className="text-xs font-medium text-mute">{pr.commentCount}</span>
             </span>
           )}
           {pr.conflictCount > 0 && (
             <span className="flex items-center gap-1" title={t('card.conflicts')}>
-              <GitCompareArrows size={13} className="text-[#DC2626]" />
+              <GitCompareArrows size={rem(13)} className="text-[#DC2626]" />
               <span className="text-xs font-medium text-[#DC2626]">{pr.conflictCount}</span>
             </span>
           )}
-          <span className="flex items-center gap-1" title={t('card.approvals')}>
-            <CircleCheck size={13} className={pr.approved ? 'text-[#16A34A]' : 'text-faint'} />
-            <span className={cx('text-xs font-medium', pr.approved ? 'text-[#16A34A]' : 'text-mute')}>
-              {pr.approvals}/{pr.reviewers}
+          {pr.noReviewers ? (
+            // Caso raro: sem ninguém para votar, a contagem não diz nada e dá lugar ao aviso.
+            <span className="flex items-center gap-1" title={t('card.noReviewerHint')}>
+              <UserX size={rem(13)} className="text-[#B45309]" />
+              <span className="whitespace-nowrap text-xs font-medium text-[#B45309]">{t('card.noReviewer')}</span>
             </span>
-          </span>
+          ) : (
+            <span className="flex items-center gap-1" title={t('card.approvals')}>
+              <CircleCheck size={rem(13)} className={pr.approved ? 'text-[#16A34A]' : 'text-faint'} />
+              <span className={cx('text-xs font-medium', pr.approved ? 'text-[#16A34A]' : 'text-mute')}>
+                {pr.approvals}/{pr.reviewers}
+              </span>
+            </span>
+          )}
         </div>
       </div>
     </a>
@@ -180,7 +195,7 @@ export function ColumnShell({
       ref={sectionRef}
       aria-label={column.name}
       className={cx(
-        'flex min-w-[225px] flex-1 basis-0 flex-col gap-2.5 self-start rounded-xl p-2.5',
+        'flex min-w-[14.0625rem] flex-1 basis-0 flex-col gap-2.5 self-start rounded-xl p-2.5',
         scrolls && 'max-h-full',
         tone,
         highlight ? 'stroke-2' : 'stroke',
@@ -192,7 +207,7 @@ export function ColumnShell({
           <Dot color={column.color} />
           <h2 className="text-sm font-bold text-ink">{column.name}</h2>
           {count !== undefined && (
-            <span className="stroke rounded-[10px] bg-white px-[7px] py-px text-xs font-semibold text-ink-2">{count}</span>
+            <span className="stroke rounded-[0.625rem] bg-white px-[0.4375rem] py-px text-xs font-semibold text-ink-2">{count}</span>
           )}
           {headerAction && <span className="ml-auto flex">{headerAction}</span>}
         </div>
@@ -224,8 +239,8 @@ export function ColumnSlot({ shown, children }: { shown: boolean; children: Reac
       aria-hidden={!shown}
       className={cx(
         // O recorte deixa 4px de folga para o contorno de 2px das colunas destacadas não ser cortado.
-        'flex self-stretch overflow-x-clip [overflow-clip-margin:4px]',
-        shown ? 'min-w-[225px] flex-1 basis-0' : 'pointer-events-none -ml-4 w-0 min-w-0 grow-0 basis-0 opacity-0',
+        'flex self-stretch overflow-x-clip [overflow-clip-margin:0.25rem]',
+        shown ? 'min-w-[14.0625rem] flex-1 basis-0' : 'pointer-events-none -ml-4 w-0 min-w-0 grow-0 basis-0 opacity-0',
       )}
     >
       {children}
@@ -266,7 +281,8 @@ export function useColumnSlots(board: React.RefObject<HTMLElement | null>, visib
       const content = slot.firstElementChild as HTMLElement | null;
       if (content) {
         content.style.flex = 'none';
-        content.style.width = `${Math.max(from.width, to.width, 225)}px`;
+        // Escondendo, vale a largura de antes; revelando, a de depois. Nenhuma das duas fica abaixo da mínima da coluna.
+        content.style.width = `${Math.max(from.width, to.width)}px`;
       }
       const frame = (box: SlotBox) => ({
         flexGrow: 0,
@@ -301,10 +317,10 @@ export function EmptyState() {
   return (
     <div className="stroke fade-up flex flex-col items-center gap-2.5 rounded-lg bg-white px-5 py-8">
       <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#DCFCE7]">
-        <CheckCheck size={20} className="text-[#16A34A]" />
+        <CheckCheck size={rem(20)} className="text-[#16A34A]" />
       </span>
       <p className="text-sm font-semibold text-ink">{t('board.nothingOnYou')}</p>
-      <p className="text-center text-[12.5px] leading-[1.45] text-mute">
+      <p className="text-center text-[0.78125rem] leading-[1.45] text-mute">
         {t('board.allCaughtUp')}
       </p>
     </div>
@@ -322,7 +338,7 @@ export function ReviewerScopeToggle({ value, onChange }: { value: ReviewerScope;
   return (
     <div className="flex items-center justify-between gap-2 px-1.5">
       <span className="text-xs text-mute">{t('board.asReviewer')}</span>
-      <div role="radiogroup" aria-label={t('board.reviewerGroup')} className="flex gap-0.5 rounded-lg bg-[#FDEFD3] p-[3px]">
+      <div role="radiogroup" aria-label={t('board.reviewerGroup')} className="flex gap-0.5 rounded-lg bg-[#FDEFD3] p-[0.1875rem]">
         {options.map((option) => {
           const selected = option.id === value;
           return (
@@ -339,7 +355,7 @@ export function ReviewerScopeToggle({ value, onChange }: { value: ReviewerScope;
                 selected ? 'bg-white text-ink shadow-[0_1px_2px_#0F172A14]' : 'text-[#92400E] hover:text-ink',
               )}
             >
-              <option.icon size={14} />
+              <option.icon size={rem(14)} />
             </button>
           );
         })}
@@ -360,6 +376,7 @@ export function OpenColumn({
   filtered,
   now,
   controls,
+  repositoryColors,
   emptyNote = t('board.noneFiltered'),
 }: {
   id: Exclude<ColumnId, 'merged' | 'release'>;
@@ -371,6 +388,8 @@ export function OpenColumn({
   now: number;
   // Controles próprios da coluna, logo abaixo do cabeçalho.
   controls?: ReactNode;
+  // Cor que o usuário deu a cada repositório, por id.
+  repositoryColors?: Record<string, string>;
   emptyNote?: string;
 }) {
   if (loading) {
@@ -385,7 +404,7 @@ export function OpenColumn({
   return (
     <ColumnShell id={id} count={cards.length} top={controls}>
       {cards.map((pr) => (
-        <PrCard key={`${pr.provider}-${pr.repository.id}-${pr.id}`} pr={pr} now={now} />
+        <PrCard key={`${pr.provider}-${pr.repository.id}-${pr.id}`} pr={pr} now={now} color={repositoryColors?.[pr.repository.id]} />
       ))}
       {cards.length === 0 && id === 'dependsOnMe' && emptyState && <EmptyState />}
       {cards.length === 0 && filtered && <QuietNote>{emptyNote}</QuietNote>}

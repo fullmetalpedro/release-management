@@ -2,7 +2,6 @@ import { constants, createCipheriv, createPublicKey, publicEncrypt, randomBytes 
 import { describe, expect, it } from 'vitest';
 import { JsonClient, ProviderHttpError } from '../src/adapters/http-json.ts';
 import { PatTransport } from '../src/adapters/http/patTransport.ts';
-import { RateLimiter } from '../src/adapters/http/rateLimit.ts';
 import { buildServer } from '../src/adapters/http/server.ts';
 import { toStateCategory } from '../src/adapters/azure-devops/workTracking.ts';
 import { MANOEL, PEDRO } from '../src/adapters/memory/world.ts';
@@ -61,19 +60,6 @@ describe('transporte do token', () => {
     const envelope = Buffer.from(seal(transport, { nonce: transport.issueNonce(), token: 'x' }), 'base64');
     envelope[envelope.length - 20]! ^= 1;
     expect(() => transport.decrypt(envelope.toString('base64'))).toThrow(ValidationError);
-  });
-});
-
-describe('limite de tentativas', () => {
-  it('libera até o limite e volta a liberar na janela seguinte', () => {
-    let now = 0;
-    const limiter = new RateLimiter(2, 1000, () => now);
-    expect(limiter.take('a').allowed).toBe(true);
-    expect(limiter.take('a').allowed).toBe(true);
-    expect(limiter.take('a')).toEqual({ allowed: false, retryAfterSeconds: 1 });
-    expect(limiter.take('b').allowed).toBe(true);
-    now = 1000;
-    expect(limiter.take('a').allowed).toBe(true);
   });
 });
 
@@ -271,5 +257,98 @@ describe('envelope montado com WebCrypto, como no navegador', () => {
     const envelope = Buffer.concat([Buffer.from(wrappedKey), Buffer.from(iv), Buffer.from(sealed)]).toString('base64');
 
     expect(transport.decrypt(envelope)).toBe(token);
+  });
+});
+
+describe('PR sem revisor', () => {
+  it('fica em revisão e o card avisa que ninguém foi chamado para revisar', async () => {
+    const { getBoard } = await import('../src/core/usecases/board.ts');
+    const board = await getBoard({ sourceControl: new MemorySourceControl(createWorld()) }, 'p-getnota');
+    const card = board.columns.review.find((pr) => pr.id === 1290);
+    expect(card).toMatchObject({ noReviewers: true, approved: false });
+    expect(board.columns.review.filter((pr) => pr.id !== 1290).every((pr) => !pr.noReviewers)).toBe(true);
+  });
+});
+
+describe('achados do teste de caos', () => {
+  async function demoServer() {
+    const loaded = loadConfig({ AUTH_MODE: 'demo' });
+    const config = { ...loaded, demoFaults: { ...loaded.demoFaults, latencyMs: 5 } };
+    const sessions = new SessionStore(config.sessionSecret);
+    const app = await buildServer({ config, sessions, registry: new ConnectionRegistry(config, sessions), webDist: '/nao-existe' });
+    const login = await app.inject({ method: 'GET', url: '/auth/microsoft/login' });
+    return { app, cookie: String(login.headers['set-cookie']).split(';')[0]! };
+  }
+
+  it('duas criações simultâneas da mesma release: uma cria, as outras recebem "já existe"', async () => {
+    const { app, cookie } = await demoServer();
+    const create = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/projects/p-getnota/repositories/r-getnota-api/releases',
+        headers: { cookie, 'x-requested-with': 'fetch' },
+        payload: { name: 'release/2.16', pullRequestIds: [1295, 1294] },
+      });
+    const statuses = (await Promise.all(Array.from({ length: 8 }, create))).map((response) => response.statusCode).sort();
+    expect(statuses).toEqual([201, 400, 400, 400, 400, 400, 400, 400]);
+  });
+
+  it('erros barrados antes das rotas saem com os cabeçalhos de segurança e sem texto do framework', async () => {
+    const { app, cookie } = await demoServer();
+    const cases = [
+      ['/api/projects/%E0%A4%A/board', 400],
+      [`/api/avatars/${'x'.repeat(600)}`, 414],
+      ['/api/rota-que-nao-existe', 404],
+    ] as const;
+    for (const [url, status] of cases) {
+      const response = await app.inject({ method: 'GET', url, headers: { cookie } });
+      expect(response.statusCode, url).toBe(status);
+      expect(response.headers['x-frame-options'], url).toBe('DENY');
+      expect(response.headers['content-security-policy'], url).toContain("frame-ancestors 'none'");
+      expect(response.json(), url).toHaveProperty('code');
+      expect(response.body, url).not.toContain('Route GET');
+    }
+  });
+
+  it('token com quebra de linha ou caractere de controle é recusado', async () => {
+    const config = loadConfig({ SESSION_SECRET: 'x'.repeat(32) });
+    const sessions = new SessionStore(config.sessionSecret);
+    let validated = 0;
+    const app = await buildServer({
+      config,
+      sessions,
+      registry: new ConnectionRegistry(config, sessions),
+      webDist: '/nao-existe',
+      validatePat: async () => {
+        validated += 1;
+        return { owner: { id: 'u', name: 'U' } };
+      },
+    });
+    for (const token of ['tok\r\nX-Injected: 1' + 'a'.repeat(30), 'tok\u0000' + 'a'.repeat(30), 'tok com espaço ' + 'a'.repeat(30)]) {
+      const { publicKey, nonce } = (await app.inject({ method: 'GET', url: '/auth/pat/key' })).json();
+      const key = randomBytes(32);
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', key, iv);
+      const sealed = Buffer.concat([cipher.update(JSON.stringify({ nonce, token })), cipher.final()]);
+      const wrapped = publicEncrypt(
+        { key: createPublicKey({ key: Buffer.from(publicKey, 'base64'), format: 'der', type: 'spki' }), padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+        key,
+      );
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/pat/github',
+        headers: { 'x-requested-with': 'fetch' },
+        payload: { organization: 'muralis', encryptedToken: Buffer.concat([wrapped, iv, sealed, cipher.getAuthTag()]).toString('base64') },
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(validated).toBe(0);
+  });
+
+  it('o número de sessões guardadas tem teto', () => {
+    const sessions = new SessionStore('s'.repeat(32));
+    const first = sessions.create({ mode: 'demo', user: { name: 'primeira' } });
+    for (let i = 0; i < 10_000; i++) sessions.create({ mode: 'demo', user: { name: 'outra' } });
+    expect(sessions.get(first.id)).toBeUndefined();
   });
 });
