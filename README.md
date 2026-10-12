@@ -71,7 +71,7 @@ For a PR without a task, **Link task** searches work items by the PR title or by
   - **Azure DevOps:** organization and personal access token. Provides the PRs and the work items.
   - **GitHub:** organization (or user) and fine-grained token. Provides the PRs.
   - **Jira:** site, account email and API token. Provides the tasks for GitHub PRs.
-- **Microsoft account:** shown when a Microsoft Entra ID app registration is configured. It only covers Azure DevOps. The step-by-step setup is in [`app/README.md`](app/README.md#conectar-ao-azure-devops) (in Portuguese).
+- **Microsoft account:** shown when a Microsoft Entra ID app registration is configured. It only covers Azure DevOps. The step-by-step setup is in [`app/README.md`](app/README.md#connecting-to-azure-devops-with-a-microsoft-account).
 
 Connections add up within the same session. Opening the board requires Azure DevOps or GitHub; with both connected, the account menu chooses which one the PRs come from.
 

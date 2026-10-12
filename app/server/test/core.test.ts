@@ -259,7 +259,7 @@ describe('detalhe da release', () => {
       [48144, 'bug', 1282],
       [48147, 'task', 1270],
     ]);
-    expect(details.unlinked).toMatchObject([{ id: 1274, suggestedTerm: 'dependências' }]);
+    expect(details.unlinked).toMatchObject([{ id: 1274, suggestedTerm: 'dependencies' }]);
   });
 
   it('vincular a task move o PR para o PBI dela; desfazer devolve', async () => {
@@ -269,14 +269,14 @@ describe('detalhe da release', () => {
     await linkWorkItem(d, 48181, ref);
     const linked = await getReleaseDetails(d, api);
     expect(linked.summary).toEqual({ pullRequests: 6, tasks: 6, pbis: 5, unlinked: 0 });
-    expect(linked.groups.at(-1)).toMatchObject({ pbi: { id: 48180, title: 'Manutenção técnica' }, tasks: 1 });
+    expect(linked.groups.at(-1)).toMatchObject({ pbi: { id: 48180, title: 'Technical maintenance' }, tasks: 1 });
 
     await unlinkWorkItem(d, 48181, ref);
     expect((await getReleaseDetails(d, api)).summary.unlinked).toBe(1);
   });
 
   it('busca tasks pelo título, com o PBI pai', async () => {
-    const found = await searchWorkItems(deps(), { projectId: 'p-getnota', term: 'dependências' });
+    const found = await searchWorkItems(deps(), { projectId: 'p-getnota', term: 'dependencies' });
     expect(found.map((w) => [w.id, w.parent?.id])).toEqual([
       [48181, 48180],
       [48176, 48180],

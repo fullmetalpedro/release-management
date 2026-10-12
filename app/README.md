@@ -1,105 +1,112 @@
-# Release Management — aplicação
+# Release Management — application
 
-Referência técnica da aplicação. Para a visão geral, as telas e o caminho do token pessoal, veja o [README da raiz](../README.md). O design fica em `../design/releaseManagement.pen`.
-Os PRs vêm do Azure DevOps ou do GitHub, e as tasks, do Azure DevOps ou do Jira. A entrada é por conta Microsoft (só Azure DevOps) ou por token pessoal de cada plataforma.
+Technical reference for the application. For the overview, the screens and the path of the personal access token, see the [root README](../README.md). The design lives in `../design/releaseManagement.pen`.
 
-## Rodar
+Pull requests come from Azure DevOps or GitHub, and tasks from Azure DevOps or Jira. You sign in with a Microsoft account (Azure DevOps only) or with a personal access token for each platform.
+
+## Running
 
 ```bash
 npm install
 npm run dev
 ```
 
-Abra http://localhost:5173. Sem `.env`, a entrada é por token pessoal, informado na própria tela.
+Open http://localhost:5173. Without a `.env` file, you sign in with a personal access token, entered on the screen itself.
 
-| Comando | O que faz |
+| Command | What it does |
 |---|---|
-| `npm run dev` | API (porta 3001) e front (porta 5173) com recarga |
-| `npm test` | Testes do servidor |
-| `npm run typecheck` | Tipos do servidor e do front |
-| `npm run build` e `npm start` | Build do front e API servindo tudo na porta 3001 |
-| `npm run chaos -w server` | Teste de caos contra um servidor local |
+| `npm run dev` | API (port 3001) and front end (port 5173) with reload |
+| `npm test` | Server tests |
+| `npm run typecheck` | Types for the server and the front end |
+| `npm run build` and `npm start` | Builds the front end and serves everything from the API on port 3001 |
+| `npm run chaos -w server` | Chaos test against a local server |
 
-Para conferir o adapter contra a organização real sem gravar nada, com `AZDO_ORG` e `AZDO_PAT` no `.env`: `cd server && npx tsx --env-file=../.env scripts/smoke-readonly.ts`.
+To check the adapter against a real organization without writing anything, with `AZDO_ORG` and `AZDO_PAT` in `.env`: `cd server && npx tsx --env-file=../.env scripts/smoke-readonly.ts`.
 
-## Conectar ao Azure DevOps
+To see the interface with fictitious data and no platform at all, start it with `AUTH_MODE=demo`.
 
-1. No Microsoft Entra ID, crie um **App registration** (single tenant, o mesmo tenant ligado à organização do Azure DevOps).
-2. Em **Authentication**, adicione a plataforma **Web** com a Redirect URI `http://localhost:5173/auth/microsoft/callback` (em produção, `https://<seu-domínio>/auth/microsoft/callback`).
-3. Em **Certificates & secrets**, crie um client secret.
-4. Em **API permissions**, adicione a permissão delegada **Azure DevOps → user_impersonation** e conceda o consentimento do administrador, se o tenant exigir.
-5. Copie `.env.example` para `.env` e preencha `ENTRA_*`, `AZDO_ORG`, `AZDO_PROJECTS` e `SESSION_SECRET`.
+## Connecting to Azure DevOps with a Microsoft account
 
-O usuário só enxerga e altera o que as permissões dele no Azure DevOps permitem. Criar a branch de release exige permissão de criar branch no repositório; vincular task exige edição de work items.
+1. In Microsoft Entra ID, create an **App registration** (single tenant, the same tenant linked to the Azure DevOps organization).
+2. Under **Authentication**, add the **Web** platform with the redirect URI `http://localhost:5173/auth/microsoft/callback` (in production, `https://<your-domain>/auth/microsoft/callback`).
+3. Under **Certificates & secrets**, create a client secret.
+4. Under **API permissions**, add the delegated permission **Azure DevOps → user_impersonation** and grant admin consent if the tenant requires it.
+5. Copy `.env.example` to `.env` and fill in `ENTRA_*`, `AZDO_ORG`, `AZDO_PROJECTS` and `SESSION_SECRET`.
 
-Em produção, defina `APP_URL` com a URL pública (HTTPS) e, atrás de um proxy, `API_HOST=0.0.0.0`.
+Users only see and change what their Azure DevOps permissions allow. Creating the release branch requires permission to create branches in the repository; linking a task requires permission to edit work items.
 
-## Duas formas de entrar
+In production, set `APP_URL` to the public URL (HTTPS) and, behind a proxy, `API_HOST=0.0.0.0`.
 
-A tela de entrada tem um seletor entre **Conta Microsoft** e **Token pessoal**, e a última escolha fica guardada no navegador.
+## Two ways to sign in
 
-- **Token pessoal:** sempre disponível. Cada plataforma tem o seu token, e o guia de escopos fica na própria tela. Conectar outro token numa plataforma substitui o dela, e é assim que se troca de organização.
-  - **Azure DevOps:** organização e Personal Access Token. Fornece os PRs e os work items.
-  - **GitHub:** organização (ou usuário) e fine-grained token. Fornece os PRs.
-  - **Jira:** site (`empresa.atlassian.net`), e-mail da conta e API token. Fornece as tasks dos PRs do GitHub.
-- **Conta Microsoft:** disponível quando o app registration está configurado (seção acima). Sem ele, a opção aparece com o aviso de que ainda não está configurada.
+The sign-in screen has a selector between **Microsoft account** and **Personal access token**, and the last choice is remembered in the browser.
 
-O token pessoal nunca fica em claro fora da memória do processo no instante do uso:
+- **Personal access token:** always available. Each platform has its own token, and the scope guide is on the screen itself. Connecting another token to a platform replaces that platform's token, which is how you switch organizations.
+  - **Azure DevOps:** organization and personal access token. Provides the PRs and the work items.
+  - **GitHub:** organization (or user) and fine-grained token. Provides the PRs.
+  - **Jira:** site (`company.atlassian.net`), account email and API token. Provides the tasks for GitHub PRs.
+- **Microsoft account:** available when the app registration is configured (section above).
 
-- **No envio:** o navegador cifra o token com uma chave AES-GCM descartável e embrulha essa chave com RSA-OAEP, usando a chave pública que o servidor gera a cada inicialização. Cada envio leva um nonce de uso único, então um envio capturado não pode ser repetido.
-- **No servidor:** é validado na plataforma e guardado selado com AES-256-GCM, tanto na sessão em memória quanto no arquivo `.data/sessions.enc`.
-- **No navegador:** só existe o cookie de sessão (HttpOnly), que não contém o token.
+Connections add up within the same session. Opening the board requires Azure DevOps or GitHub; with both connected, the account menu chooses which one the PRs come from. With GitHub active and no Jira, the board and the releases work, but there are no tasks to link.
 
-As conexões se somam na mesma sessão. Para abrir o board é preciso o Azure DevOps ou o GitHub; com os dois conectados, o menu de contas escolhe de qual vêm os PRs. Com o GitHub ativo e sem Jira, o board e as releases funcionam, mas não há tasks para vincular.
+### Token handling
 
-Sem `SESSION_SECRET` as sessões não são gravadas em disco e caem a cada restart. Em produção use HTTPS de qualquer forma: a cifra do envio é uma camada a mais (o token não aparece em logs de proxy nem no corpo da requisição), mas não protege o cookie de sessão nem resiste a quem altera o tráfego.
+The personal access token is never in plain text outside the process memory at the moment it is used. The [root README](../README.md#how-the-personal-access-token-travels) describes the whole path; in short:
 
-O servidor também:
+- **In transit:** the browser encrypts the token with a throwaway AES-GCM key and wraps that key with RSA-OAEP, using the public key the server generates at every start. Each submission carries a single-use nonce, so a captured submission can't be replayed.
+- **On the server:** it is validated on the platform and stored sealed with AES-256-GCM, both in the in-memory session and in the `.data/sessions.enc` file.
+- **In the browser:** only the session cookie (HttpOnly) exists, and it doesn't contain the token.
 
-- manda cabeçalhos de segurança em toda resposta (Content-Security-Policy, `X-Frame-Options`, `nosniff`, `Referrer-Policy` e, com HTTPS, HSTS);
-- limita as tentativas de entrada a 60 por minuto por IP. Atrás de um proxy reverso, defina `TRUST_PROXY=true`, senão todos os usuários contam como o IP do proxy;
-- recusa ids de projeto e repositório que não tenham forma de id, e codifica todos antes de montar o endereço do provedor.
+Without `SESSION_SECRET`, sessions aren't written to disk and are lost on every restart. Use HTTPS in production regardless: the transit encryption is an extra layer (the token doesn't appear in proxy logs or in the request body), but it doesn't protect the session cookie and doesn't hold against someone who can alter the traffic.
 
-Para ver a interface com dados fictícios, sem provedor nenhum, suba com `AUTH_MODE=demo`.
+The server also:
 
-## Idiomas
+- sends security headers on every response (Content-Security-Policy, `X-Frame-Options`, `nosniff`, `Referrer-Policy` and, over HTTPS, HSTS);
+- limits sign-in attempts to 60 per minute per IP. Behind a reverse proxy, set `TRUST_PROXY=true`, otherwise every user counts as the proxy's IP;
+- rejects project and repository ids that don't look like ids, and encodes all of them before building the platform URL.
 
-A interface fala português, inglês e francês e segue o idioma do navegador (o primeiro da lista de preferências que ela conhece; nenhum, inglês). Não há seletor. Os textos ficam em `web/src/locales`, com `pt.ts` como origem: os outros catálogos precisam ter as mesmas chaves, e o TypeScript acusa se faltar alguma. As mensagens de erro da API saem no mesmo idioma, pelo `Accept-Language` que o front envia (`server/src/i18n.ts`).
+## Languages
 
-Os termos seguem a interface de cada plataforma: em francês, "jeton d'accès personnel" e "élément de travail" como no Azure DevOps e "ticket" como no Jira; em inglês, "work item" também para o Jira. O GitHub só tem interface em inglês, então o guia de token em francês cita os botões em inglês.
+The interface speaks Portuguese, English and French and follows the browser language (the first one in the preference list that it knows; if none, English). There is no selector. The texts live in `web/src/locales`, with `pt.ts` as the source: the other catalogs must have the same keys, and TypeScript complains if one is missing. API error messages come in the same language, through the `Accept-Language` header the front end sends (`server/src/i18n.ts`).
 
-## Como a release é montada
+The terms follow each platform's own interface: in French, "jeton d'accès personnel" and "élément de travail" as in Azure DevOps, and "ticket" as in Jira; in English, "work item" for Jira as well. GitHub's interface is English-only, so the French token guide quotes the buttons in English.
 
-- **Mergeados**: PRs concluídos em `develop` cujo "Merged PR N" ainda não aparece na base (`main` ou `master`, a que existir no repositório) nem nas três últimas branches de release.
-- **Quais branches são release**: `RELEASE_PATTERN` é uma regex. O padrão aceita `release-sprint-35`, `release/2.15` e `release/0.1.0`, e exige que o nome termine no número, o que deixa de fora branches de trabalho (`release/131046-descricao`) e hotfixes (`release-sprint-35-hotfix`). A mais nova é a de maior número, e o próximo nome sugerido segue o formato dela; num repositório sem release, vale `RELEASE_FIRST`.
-- **Criar branch de release**: cada PR selecionado é aplicado por cherry-pick, em ordem de merge, sobre uma branch temporária a partir de `main`. Só quando todos passam a `release/x.y` é criada; em conflito, as temporárias são apagadas e nada fica para trás.
-- **Release**: os PRs são lidos das mensagens de commit que a branch tem a mais que `main` (ou que a release anterior, se ela já voltou para `main`).
+## How a release is put together
 
-### No GitHub e no Jira
+- **Merged**: PRs completed into `develop` whose "Merged PR N" doesn't yet appear in the base branch (`main` or `master`, whichever exists in the repository) or in the three latest release branches.
+- **Which branches are releases**: `RELEASE_PATTERN` is a regular expression. The default accepts `release-sprint-35`, `release/2.15` and `release/0.1.0`, and requires the name to end with the number, which leaves out work branches (`release/131046-description`) and hotfixes (`release-sprint-35-hotfix`). The newest release is the one with the highest number, and the next suggested name follows its format; in a repository with no release, `RELEASE_FIRST` applies.
+- **Creating the release branch**: each selected PR is cherry-picked, in merge order, onto a temporary branch starting from `main`. Only when all of them apply is `release/x.y` created; on a conflict, the temporary branches are deleted and nothing is left behind.
+- **Release**: the PRs are read from the commit messages the branch has beyond `main` (or beyond the previous release, if that one has already been merged back into `main`).
 
-- **Projeto**: a organização (ou o usuário) informada na conexão é o único projeto; os repositórios são os dela.
-- **Qual PR está em qual branch**: pelo número na primeira linha do commit, `Merge pull request #N` ou o `(#N)` do squash. Merge por rebase não deixa número e o PR não é reconhecido.
-- **Criar branch de release**: a API do GitHub não tem cherry-pick. Cada PR é aplicado com um merge de três vias numa branch temporária `rm-tmp/…` (a base do merge é o pai do commit do PR), e o resultado vira um commit de pai único na release. A temporária é apagada no fim, com ou sem conflito.
-- **Tasks de um PR**: as issues vinculadas por aqui (um *remote link* na issue, apontando para o PR) mais as chaves citadas no título ou na branch do PR (`PROJ-7`). O épico da issue faz o papel do PBI.
+### On GitHub and Jira
 
-## Arquitetura
+- **Project**: the organization (or user) given when connecting is the only project; its repositories are the repositories.
+- **Which PR is in which branch**: by the number in the first line of the commit, `Merge pull request #N` or the squash's `(#N)`. A rebase merge leaves no number, so the PR isn't recognized.
+- **Creating the release branch**: the GitHub API has no cherry-pick. Each PR is applied with a three-way merge on a temporary `rm-tmp/…` branch (the merge base is the parent of the PR's commit), and the result becomes a single-parent commit on the release. The temporary branch is deleted at the end, with or without a conflict.
+- **Tasks of a PR**: the issues linked from here (a *remote link* on the issue, pointing at the PR) plus the keys mentioned in the PR's title or branch (`PROJ-7`). The issue's epic plays the role of the backlog item.
 
-Hexagonal: o núcleo define portas por capacidade e não conhece nenhum provedor.
+## Architecture
+
+Hexagonal: the core defines ports by capability and knows nothing about any platform.
 
 ```
 server/src
-  core/domain      modelo canônico (PullRequest, Review, WorkItem, ReleaseBranch) e erros
+  core/domain      canonical model (PullRequest, Review, WorkItem, ReleaseBranch) and errors
   core/ports       SourceControl, WorkTracking, IdentityProvider
-  core/usecases    board, projetos, mergeados/release, detalhe da release, vínculo de task
-  adapters/azure-devops   SourceControl e WorkTracking sobre a REST API
-  adapters/github         SourceControl sobre GraphQL (PRs abertos) e REST
-  adapters/jira           WorkTracking sobre a REST API do Jira Cloud
+  core/usecases    board, projects, merged/release lanes, release details, task linking
+  adapters/azure-devops   SourceControl and WorkTracking over the REST API
+  adapters/github         SourceControl over GraphQL (open PRs) and REST
+  adapters/jira           WorkTracking over the Jira Cloud REST API
   adapters/entra          IdentityProvider (authorization code + PKCE)
-  adapters/memory         os mesmos contratos em memória (demonstração e testes)
-  adapters/session        sessões cifradas em disco
-  adapters/http           rotas Fastify
-  registry.ts      escolhe os adapters de cada sessão
+  adapters/memory         the same contracts in memory (demo and tests)
+  adapters/session        sessions encrypted on disk
+  adapters/http           Fastify routes
+  registry.ts      picks the adapters for each session
 web/src            React + Tailwind
 ```
 
-Para adicionar outra plataforma: implemente a porta correspondente em `adapters/`, registre em `registry.ts` e, para a conexão por token, em `adapters/http/patProviders.ts`. GitHub e Jira só entram por token pessoal; o login OAuth deles ainda não existe.
+To add another platform: implement the matching port under `adapters/`, register it in `registry.ts` and, for token sign-in, in `adapters/http/patProviders.ts`. GitHub and Jira only support personal access tokens; their OAuth sign-in doesn't exist yet.
+
+## What hasn't been tested against the real APIs
+
+The GitHub and Jira adapters and the Azure DevOps write paths are covered only by simulated responses.
