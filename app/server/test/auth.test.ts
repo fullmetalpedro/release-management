@@ -152,7 +152,7 @@ describe('servidor HTTP', () => {
     const me = await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } });
     expect(me.json()).toMatchObject({ user: { name: 'Pedro Carlo' }, demo: true });
     expect(me.json().accounts.filter((a: { connected: boolean }) => a.connected)).toEqual([
-      { provider: 'azure-devops', connected: true, active: true, handle: 'pedro.carlo@muralis.com.br' },
+      { provider: 'azure-devops', connected: true, active: true, handle: 'pedro.carlo@example.com' },
     ]);
 
     const projects = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });

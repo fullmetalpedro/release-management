@@ -450,7 +450,7 @@ export function ReleasePage() {
               rel="noreferrer"
               aria-disabled={!release}
               className={cx(
-                'flex items-center gap-1.5 rounded-lg px-3.5 py-2',
+                'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-2',
                 release ? 'hover-primary bg-ink' : 'pointer-events-none bg-[#E2E8F0]',
               )}
             >
