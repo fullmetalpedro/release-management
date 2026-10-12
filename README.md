@@ -1,6 +1,6 @@
 # Release Management
 
-Board de code review e montagem de releases para times que trabalham com vários repositórios. Reúne num só lugar os pull requests que dependem de você, o que já foi mergeado e ainda não entrou em release, e o conteúdo de cada release com as tasks de cada PR.
+Board de code review e montagem de releases para times que trabalham com vários repositórios, pensado para um momento em que a IA gera código mais rápido do que as pessoas conseguem revisar. Reúne num só lugar os pull requests que dependem de você, o que já foi mergeado e ainda não entrou em release, e o conteúdo de cada release com as tasks de cada PR.
 
 Os PRs vêm do **Azure DevOps** ou do **GitHub**; as tasks, do **Azure DevOps** ou do **Jira**. A ferramenta não guarda dados dessas plataformas: lê e escreve nelas com a conta de quem está usando, e cada pessoa só enxerga e altera o que as próprias permissões permitem.
 
@@ -10,15 +10,21 @@ Os PRs vêm do **Azure DevOps** ou do **GitHub**; as tasks, do **Azure DevOps** 
 
 - [Para que serve](#para-que-serve)
 - [Como funciona na prática](#como-funciona-na-prática)
-- [Rodar localmente](#rodar-localmente)
 - [Formas de entrar](#formas-de-entrar)
 - [Como o token pessoal trafega](#como-o-token-pessoal-trafega)
 - [Arquitetura](#arquitetura)
 - [Organização do repositório](#organização-do-repositório)
-- [Testes](#testes)
 - [Documentação relacionada](#documentação-relacionada)
 
 ## Para que serve
+
+### O gargalo mudou de lugar
+
+Com assistentes de IA, escrever código ficou rápido. O volume de pull requests cresceu, mas a capacidade de revisar continua sendo a das mesmas pessoas. O gargalo da entrega deixou de ser a escrita e passou a ser o **code review** e a organização em volta dele: saber o que está esperando por quem, o que já pode ser mergeado e o que de fato vai entrar na próxima release.
+
+As plataformas mostram os PRs repositório por repositório, o que funciona com poucos PRs por dia e deixa de funcionar quando eles se multiplicam. Esta ferramenta existe para dar a quem revisa uma fila única e priorizada, e para tirar do caminho o trabalho manual de montar a release depois que a revisão termina.
+
+### As perguntas do dia a dia
 
 Num produto com vários repositórios, três perguntas tomam tempo todos os dias:
 
@@ -58,34 +64,6 @@ A release mais recente de cada repositório abre numa tabela com os PRs agrupado
 Para um PR sem task, **Vincular task** busca os work items pelo título do PR ou pelo que você digitar. O vínculo é gravado na plataforma (Azure DevOps ou Jira) e pode ser desfeito.
 
 ![Vincular uma task a um PR](docs/images/vincular-task.png)
-
-## Rodar localmente
-
-Requisitos: Node.js 22 ou mais novo (desenvolvido com a versão 24).
-
-```bash
-cd app
-npm install
-npm run dev
-```
-
-Abra http://localhost:5173. Sem nenhuma configuração, a entrada é por token pessoal, informado na própria tela.
-
-Para ver a interface com dados fictícios, sem conectar em plataforma nenhuma:
-
-```bash
-AUTH_MODE=demo npm run dev
-```
-
-| Comando (em `app/`) | O que faz |
-|---|---|
-| `npm run dev` | API na porta 3001 e front na 5173, com recarga |
-| `npm test` | Testes do servidor |
-| `npm run typecheck` | Tipos do servidor e do front |
-| `npm run build` e `npm start` | Build do front e API servindo tudo na porta 3001 |
-| `npm run chaos -w server` | Teste de caos contra um servidor local |
-
-As variáveis de ambiente estão descritas em [`app/.env.example`](app/.env.example).
 
 ## Formas de entrar
 
@@ -212,21 +190,9 @@ docs/
   capturar-telas.mjs      roteiro que gera as capturas
 ```
 
-## Testes
-
-```bash
-cd app
-npm test                  # testes do servidor
-npm run chaos -w server   # teste de caos
-```
-
-O teste de caos sobe o servidor localmente e o ataca com parâmetros e corpos hostis, cookies forjados, envelopes de token adulterados, corridas e rajadas. Ele confere que nenhuma resposta é um erro interno, que nada interno vaza e que os cabeçalhos de segurança estão em toda resposta.
-
-Ainda sem teste contra as APIs reais: os adapters do GitHub e do Jira e os caminhos de escrita do Azure DevOps são cobertos só por respostas simuladas.
-
 ## Documentação relacionada
 
-- [`app/README.md`](app/README.md): referência técnica da aplicação (configuração do login Microsoft, regras de montagem da release, idiomas, arquitetura em detalhe).
+- [`app/README.md`](app/README.md): referência técnica da aplicação (como rodar, comandos, configuração do login Microsoft, regras de montagem da release, idiomas, arquitetura em detalhe).
 - [`design/onboarding/README.md`](design/onboarding/README.md): como o tour de onboarding é feito e como recapturar as telas.
 
 ### Atualizar as capturas deste README
