@@ -1,15 +1,21 @@
-// Capturas de tela para o README: demonstração em :5174 e entrada por token em :5173, no Edge headless.
+// Screenshots for the README, taken from the running app with headless Microsoft Edge: the demo (AUTH_MODE=demo) on
+// :5174 and the regular app, for the token sign-in screen, on :5173.
+//
+//   node docs/capture-screenshots.mjs docs/images [language]
+//
+// The interface follows the browser language; the default here is English (en).
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const OUT = process.argv[2];
+const LANG = process.argv[3] ?? 'en';
 mkdirSync(OUT, { recursive: true });
 const PORT = 9334;
 const edge = spawn(
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  ['--headless=new', '--disable-gpu', '--lang=pt-BR', '--accept-lang=pt-BR', '--window-size=1440,900', '--hide-scrollbars', `--remote-debugging-port=${PORT}`, `--user-data-dir=${mkdtempSync(join(tmpdir(), 'rm-shots-'))}`, 'about:blank'],
+  ['--headless=new', '--disable-gpu', `--lang=${LANG}`, `--accept-lang=${LANG}`, '--window-size=1440,900', '--hide-scrollbars', `--remote-debugging-port=${PORT}`, `--user-data-dir=${mkdtempSync(join(tmpdir(), 'rm-shots-'))}`, 'about:blank'],
   { stdio: 'ignore' },
 );
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -33,11 +39,16 @@ const send = (method, params = {}) => new Promise((resolve) => {
 });
 const run = async (expression) => {
   const { result } = await send('Runtime.evaluate', { expression: `(async () => { const wait = (ms) => new Promise((r) => setTimeout(r, ms)); const button = (re) => [...document.querySelectorAll('button')].find((b) => re.test(b.textContent.trim())); ${expression} })()`, awaitPromise: true, returnByValue: true });
-  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? 'falha');
+  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? 'evaluation failed');
   return result.result.value;
 };
 await send('Page.enable');
 await send('Runtime.enable');
+// The command-line flag alone doesn't always reach the first page, so the language is also set here.
+const { result: version } = await send('Browser.getVersion');
+await send('Network.enable');
+await send('Network.setUserAgentOverride', { userAgent: version.userAgent.replace('Headless', ''), acceptLanguage: LANG });
+await send('Emulation.setLocaleOverride', { locale: LANG });
 await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
 const go = async (url, ms = 2800) => {
   await send('Page.navigate', { url });
@@ -50,7 +61,7 @@ const shot = async (name, clip) => {
 };
 
 try {
-  // ---- Demonstração ----
+  // ---- Demo ----
   const DEMO = 'http://localhost:5174';
   await go(`${DEMO}/auth/microsoft/login`);
   await run(`
@@ -60,31 +71,30 @@ try {
   await go(`${DEMO}/`, 3500);
   await shot('board');
 
-  await run(`button(/^Repositório/).click(); await wait(400); document.querySelectorAll('[role=dialog] button[aria-haspopup=dialog]')[1].click(); await wait(500);`);
-  await shot('cores-repositorio', { x: 380, y: 100, width: 760, height: 300 });
+  await run(`button(/^(Repository|Repositório|Référentiel)/).click(); await wait(400); document.querySelectorAll('[role=dialog] button[aria-haspopup=dialog]')[1].click(); await wait(500);`);
+  await shot('repository-colors', { x: 380, y: 100, width: 760, height: 300 });
   await run(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); await wait(100);`);
   await go(`${DEMO}/`, 3000);
 
-  await run(`document.querySelector('[aria-label="Selecionar PR #1295"]').click(); await wait(150); document.querySelector('[aria-label="Selecionar PR #1294"]').click(); await wait(400);`);
-  await shot('criar-release', { x: 760, y: 150, width: 680, height: 750 });
+  await run(`document.querySelector('[aria-label$="PR #1295"]').click(); await wait(150); document.querySelector('[aria-label$="PR #1294"]').click(); await wait(400);`);
+  await shot('create-release', { x: 760, y: 150, width: 680, height: 750 });
 
   await go(`${DEMO}/release?repo=r-getnota-api`, 3500);
   await shot('release');
-  await run(`button(/^Vincular task/).click(); await wait(1800);`);
-  await shot('vincular-task', { x: 20, y: 440, width: 900, height: 460 });
+  await run(`button(/^(Link task|Vincular task|Lier)/).click(); await wait(1800);`);
+  await shot('link-task', { x: 20, y: 440, width: 900, height: 460 });
 
-  // ---- Entrada por token ----
+  // ---- Token sign-in ----
   await go('http://localhost:5173/login', 3000);
   await run(`
-    const tab = [...document.querySelectorAll('[role=tab]')].find((t) => /Token pessoal/.test(t.textContent));
-    tab?.click(); await wait(600);
+    document.querySelectorAll('[role=tablist] [role=tab]')[1]?.click(); await wait(600);
     const org = document.querySelector('#pat-organization');
-    if (org) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(org, 'sua-organizacao'); org.dispatchEvent(new Event('input', { bubbles: true })); }
+    if (org) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(org, 'your-organization'); org.dispatchEvent(new Event('input', { bubbles: true })); }
     await wait(500); document.activeElement?.blur?.();
   `);
-  await shot('entrada-token');
+  await shot('token-sign-in');
 } catch (error) {
-  console.log('FALHA', String(error));
+  console.log('FAILED', String(error));
 }
 ws.close();
 edge.kill();
