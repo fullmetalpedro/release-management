@@ -13,8 +13,6 @@ Os PRs vêm do **Azure DevOps** ou do **GitHub**; as tasks, do **Azure DevOps** 
 - [Formas de entrar](#formas-de-entrar)
 - [Como o token pessoal trafega](#como-o-token-pessoal-trafega)
 - [Arquitetura](#arquitetura)
-- [Organização do repositório](#organização-do-repositório)
-- [Documentação relacionada](#documentação-relacionada)
 
 ## Para que serve
 
@@ -165,42 +163,3 @@ flowchart LR
 | Testes | Vitest |
 
 Para adicionar outra plataforma, implemente a porta correspondente em `app/server/src/adapters/` e registre em `registry.ts`. Os detalhes de como a release é montada em cada plataforma estão em [`app/README.md`](app/README.md#como-a-release-é-montada).
-
-## Organização do repositório
-
-```
-app/                      aplicação
-  server/                 API (Fastify)
-    src/core/             domínio, portas e casos de uso
-    src/adapters/         Azure DevOps, GitHub, Jira, Entra, sessão, HTTP, memória
-    test/                 testes
-    chaos.mts             teste de caos
-  web/                    front (React)
-    src/components/       componentes do board, menus e seletor de cor
-    src/pages/            entrada, board e release
-    src/locales/          textos em pt, en e fr
-design/                   design e material de apresentação
-  releaseManagement.pen   arquivo fonte do design (pen.dev)
-  releaseManagement-assets/  imagens usadas pelo design
-  logos/                  logos dos produtos e da Muralis
-  arquitetura.drawio      diagrama de arquitetura
-  onboarding/             tour de onboarding em HTML
-docs/
-  images/                 capturas de tela deste README
-  capturar-telas.mjs      roteiro que gera as capturas
-```
-
-## Documentação relacionada
-
-- [`app/README.md`](app/README.md): referência técnica da aplicação (como rodar, comandos, configuração do login Microsoft, regras de montagem da release, idiomas, arquitetura em detalhe).
-- [`design/onboarding/README.md`](design/onboarding/README.md): como o tour de onboarding é feito e como recapturar as telas.
-
-### Atualizar as capturas deste README
-
-Com a demonstração em `localhost:5174` e a aplicação normal em `localhost:5173`, rode:
-
-```bash
-node docs/capturar-telas.mjs docs/images
-```
-
-O roteiro usa o Microsoft Edge em modo headless e espera encontrá-lo no caminho padrão do Windows.
