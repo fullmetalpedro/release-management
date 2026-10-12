@@ -285,7 +285,7 @@ export const pt = {
           'Clique em Create API token with scopes, dê um nome e defina a validade (até 1 ano).',
           'Em Select app, escolha Jira.',
           'Marque os escopos abaixo e crie o token:',
-          'Copie o token e cole no campo do Jira, junto com o e-mail da conta e o site (ex.: muralis.atlassian.net). Ele só aparece uma vez.',
+          'Copie o token e cole no campo do Jira, junto com o e-mail da conta e o site (ex.: acme.atlassian.net). Ele só aparece uma vez.',
         ],
         scopes: [
           { name: 'read:jira-work', level: 'Read', description: 'Ler e buscar as issues vinculadas aos PRs' },

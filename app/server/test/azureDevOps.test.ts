@@ -38,13 +38,13 @@ function fakeAzure(routes: Record<string, Handler>) {
     if (result instanceof Response) return result;
     return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } });
   };
-  const client = new AzureDevOpsClient('muralis', async () => 'Bearer token-123', fetchImpl);
+  const client = new AzureDevOpsClient('acme', async () => 'Bearer token-123', fetchImpl);
   return { client, calls };
 }
 
-const repository = { id: 'repo-1', name: 'getnota-api', projectId: 'proj-1' };
+const repository = { id: 'repo-1', name: 'invoicing-api', projectId: 'proj-1' };
 const options = { releasePattern: DEFAULT_RELEASE_PATTERN, developBranch: 'develop', cherryPickPollMs: 1 };
-const identity = (id: string, displayName: string) => ({ id, displayName, uniqueName: `${id}@muralis.com.br` });
+const identity = (id: string, displayName: string) => ({ id, displayName, uniqueName: `${id}@example.com` });
 
 describe('cliente HTTP', () => {
   it('envia o bearer token e a versão da API', async () => {
@@ -73,7 +73,7 @@ describe('cliente HTTP', () => {
     });
     await expect(client.get('/_apis/projects')).rejects.toMatchObject({ status: 500, message: 'TF400898' });
 
-    const offline = new AzureDevOpsClient('muralis', async () => 'Bearer t', async () => {
+    const offline = new AzureDevOpsClient('acme', async () => 'Bearer t', async () => {
       throw new TypeError('fetch failed');
     }, 1000, 2, 1);
     await expect(offline.get('/_apis/projects')).rejects.toBeInstanceOf(ProviderUnavailableError);
@@ -94,7 +94,7 @@ describe('cliente HTTP', () => {
   it('repete leituras quando a conexão cai, mas nunca escritas', async () => {
     let calls = 0;
     const flaky = (failures: number) =>
-      new AzureDevOpsClient('muralis', async () => 'Bearer t', async () => {
+      new AzureDevOpsClient('acme', async () => 'Bearer t', async () => {
         if (++calls <= failures) throw new TypeError('fetch failed');
         return Response.json({ value: [] });
       }, 1000, 2, 1);
@@ -126,7 +126,7 @@ describe('pull requests', () => {
   it('usa o descritor da identidade como chave da foto e só busca chaves bem formadas', async () => {
     expect(avatarKeyOf({ id: '1', displayName: 'A', descriptor: 'aad.ZTNjMTJlAbCdEf' })).toBe('aad.ZTNjMTJlAbCdEf');
     expect(
-      avatarKeyOf({ id: '1', displayName: 'A', _links: { avatar: { href: 'https://dev.azure.com/muralis/_apis/GraphProfile/MemberAvatars/aad.YWEzOTk5Zm9v?size=2' } } }),
+      avatarKeyOf({ id: '1', displayName: 'A', _links: { avatar: { href: 'https://dev.azure.com/acme/_apis/GraphProfile/MemberAvatars/aad.YWEzOTk5Zm9v?size=2' } } }),
     ).toBe('aad.YWEzOTk5Zm9v');
     expect(avatarKeyOf({ id: '1', displayName: 'A' })).toBeUndefined();
     expect(avatarKeyOf({ id: '1', displayName: 'A', descriptor: '../../etc/passwd' })).toBeUndefined();
@@ -163,17 +163,17 @@ describe('pull requests', () => {
             pullRequestId: 642,
             title: 'fix: paginação',
             status: 'active',
-            createdBy: identity('pedro', 'Pedro Carlo'),
+            createdBy: identity('alex', 'Alex Rivera'),
             creationDate: '2026-10-10T12:00:00Z',
             sourceRefName: 'refs/heads/fix/paginacao',
             targetRefName: 'refs/heads/develop',
             mergeStatus: 'conflicts',
             reviewers: [
-              { ...identity('manoel', 'Manoel Martins'), vote: -5, isRequired: true },
-              { ...identity('ana', 'Ana Souza'), vote: 10 },
-              { ...identity('team', '[GetNota]\\Devs'), vote: 0, isContainer: true },
+              { ...identity('sam', 'Sam Carter'), vote: -5, isRequired: true },
+              { ...identity('ana', 'Amy Chen'), vote: 10 },
+              { ...identity('team', '[Invoicing]\\Devs'), vote: 0, isContainer: true },
             ],
-            repository: { id: 'repo-2', name: 'getnota web', project: { id: 'proj-1' } },
+            repository: { id: 'repo-2', name: 'invoicing web', project: { id: 'proj-1' } },
           },
         ],
       }),
@@ -198,11 +198,11 @@ describe('pull requests', () => {
       mergeState: 'conflicts',
       commentCount: 2,
       conflictCount: 3,
-      author: { id: 'pedro', name: 'Pedro Carlo', email: 'pedro@muralis.com.br' },
-      webUrl: 'https://dev.azure.com/muralis/proj-1/_git/getnota%20web/pullrequest/642',
+      author: { id: 'alex', name: 'Alex Rivera', email: 'alex@example.com' },
+      webUrl: 'https://dev.azure.com/acme/proj-1/_git/invoicing%20web/pullrequest/642',
     });
     expect(pr!.reviews.map((r) => [r.reviewer.id, r.decision, r.required])).toEqual([
-      ['manoel', 'waiting-author', true],
+      ['sam', 'waiting-author', true],
       ['ana', 'approved', false],
     ]);
     expect(calls[0]!.query.get('searchCriteria.status')).toBe('active');
@@ -219,7 +219,7 @@ describe('pull requests', () => {
         closedDate: '2026-10-02T00:00:00Z',
         sourceRefName: 'refs/heads/a',
         targetRefName: 'refs/heads/develop',
-        repository: { id: 'repo-1', name: 'getnota-api', project: { id: 'proj-1' } },
+        repository: { id: 'repo-1', name: 'invoicing-api', project: { id: 'proj-1' } },
       }),
     });
     const found = await new AzureDevOpsSourceControl(client, options).getPullRequests(repository, [1, 999]);
@@ -340,7 +340,7 @@ describe('criação da branch de release', () => {
   }
 
   const input = { repository, name: 'release/2.16', baseBranch: 'main', pullRequestIds: [1291, 1294, 1295] };
-  const me = { 'GET /_apis/connectionData': () => ({ authenticatedUser: { id: 'pedro', providerDisplayName: 'Pedro Carlo' } }) };
+  const me = { 'GET /_apis/connectionData': () => ({ authenticatedUser: { id: 'alex', providerDisplayName: 'Alex Rivera' } }) };
 
   it('encadeia os cherry-picks, cria a release no último commit e apaga as temporárias', async () => {
     const { client, calls, refs } = cherryPickFake({});
@@ -354,7 +354,7 @@ describe('criação da branch de release', () => {
 
     const branch = await new AzureDevOpsSourceControl(client, options).createReleaseBranch(input);
 
-    expect(branch).toMatchObject({ name: 'release/2.16', baseBranch: 'main', createdBy: { id: 'pedro' } });
+    expect(branch).toMatchObject({ name: 'release/2.16', baseBranch: 'main', createdBy: { id: 'alex' } });
     expect(Object.fromEntries(refs)).toEqual({ 'refs/heads/main': 'sha-main', 'refs/heads/release/2.16': 'sha-after-1295' });
 
     const picks = calls.filter((c) => c.method === 'POST' && c.path.endsWith('/cherryPicks')).map((c) => c.body as { ontoRefName: string; generatedRefName: string; source: unknown });
@@ -394,7 +394,7 @@ describe('work items', () => {
   it('carrega os work items do PR com o PBI pai', async () => {
     const wi = (id: number, type: string, title: string, state: string, parent?: number) => ({
       id,
-      fields: { 'System.Title': title, 'System.WorkItemType': type, 'System.State': state, 'System.TeamProject': 'GetNota', 'System.Parent': parent },
+      fields: { 'System.Title': title, 'System.WorkItemType': type, 'System.State': state, 'System.TeamProject': 'Invoicing', 'System.Parent': parent },
     });
     const { client, calls } = fakeAzure({
       'GET /pullRequests/1284/workitems': () => ({ value: [{ id: '48125' }] }),
@@ -414,13 +414,13 @@ describe('work items', () => {
         title: 'Cadastro de centros de custo (API)',
         kind: 'task',
         state: { name: 'Concluída', category: 'done' },
-        webUrl: 'https://dev.azure.com/muralis/_workitems/edit/48125',
+        webUrl: 'https://dev.azure.com/acme/_workitems/edit/48125',
         parent: {
           id: 48120,
           title: 'Centros de custo',
           kind: 'pbi',
           state: { name: 'Em teste', category: 'testing' },
-          webUrl: 'https://dev.azure.com/muralis/_workitems/edit/48120',
+          webUrl: 'https://dev.azure.com/acme/_workitems/edit/48120',
         },
       },
     ]);

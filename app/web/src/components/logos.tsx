@@ -49,3 +49,15 @@ export function MicrosoftLogo() {
     </span>
   );
 }
+
+// Marca da aplicação: as colunas de um board, nas cores das colunas.
+export function AppMark({ size = 48 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 48 48" width={rem(size)} height={rem(size)} aria-hidden className="shrink-0">
+      <rect width="48" height="48" rx="12" fill="#0F172A" />
+      <rect x="11" y="12" width="7" height="24" rx="2.5" fill="#F59E0B" />
+      <rect x="20.5" y="12" width="7" height="16" rx="2.5" fill="#3B82F6" />
+      <rect x="30" y="12" width="7" height="20" rx="2.5" fill="#8B5CF6" />
+    </svg>
+  );
+}

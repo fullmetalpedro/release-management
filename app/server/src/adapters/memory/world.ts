@@ -41,29 +41,29 @@ export interface World {
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
-export const PEDRO: Person = { id: 'u-pedro', name: 'Pedro Carlo', email: 'pedro.carlo@example.com' };
-export const MANOEL: Person = { id: 'u-manoel', name: 'Manoel Martins', email: 'manoel.martins@example.com' };
-const ANA: Person = { id: 'u-ana', name: 'Ana Souza', email: 'ana.souza@example.com' };
-const BRUNO: Person = { id: 'u-bruno', name: 'Bruno Lima', email: 'bruno.lima@example.com' };
+export const ALEX: Person = { id: 'u-alex', name: 'Alex Rivera', email: 'alex.rivera@example.com' };
+export const SAM: Person = { id: 'u-sam', name: 'Sam Carter', email: 'sam.carter@example.com' };
+const AMY: Person = { id: 'u-amy', name: 'Amy Chen', email: 'amy.chen@example.com' };
+const BEN: Person = { id: 'u-ben', name: 'Ben Fischer', email: 'ben.fischer@example.com' };
 
 type Vote = [Person, ReviewDecision, required?: boolean];
 
 export function createWorld(now = Date.now()): World {
   const projects: Project[] = [
-    { id: 'p-getnota', name: 'GetNota' },
-    { id: 'p-leadcomex', name: 'Lead Comex' },
-    { id: 'p-jane', name: 'Jane' },
+    { id: 'p-invoicing', name: 'Invoicing' },
+    { id: 'p-trade', name: 'Trade Desk' },
+    { id: 'p-scheduler', name: 'Scheduler' },
   ];
   const repo = (id: string, projectId: string): Repository => ({ id: `r-${id}`, name: id, projectId });
   const repositories = [
-    repo('getnota-api', 'p-getnota'),
-    repo('getnota-web', 'p-getnota'),
-    repo('getnota-worker', 'p-getnota'),
-    repo('getnota-infra', 'p-getnota'),
-    repo('leadcomex-api', 'p-leadcomex'),
-    repo('leadcomex-web', 'p-leadcomex'),
-    repo('jane-api', 'p-jane'),
-    repo('jane-app', 'p-jane'),
+    repo('invoicing-api', 'p-invoicing'),
+    repo('invoicing-web', 'p-invoicing'),
+    repo('invoicing-worker', 'p-invoicing'),
+    repo('invoicing-infra', 'p-invoicing'),
+    repo('trade-api', 'p-trade'),
+    repo('trade-web', 'p-trade'),
+    repo('scheduler-api', 'p-scheduler'),
+    repo('scheduler-app', 'p-scheduler'),
   ];
   const repoByName = (name: string) => repositories.find((r) => r.name === name)!;
   const ago = (ms: number) => new Date(now - ms).toISOString();
@@ -99,77 +99,77 @@ export function createWorld(now = Date.now()): World {
     });
   };
   const merged = (repoName: string, id: number, title: string, author: Person, age: number) => {
-    open(repoName, id, title, author, age + DAY, [[author === PEDRO ? MANOEL : PEDRO, 'approved']], {
+    open(repoName, id, title, author, age + DAY, [[author === ALEX ? SAM : ALEX, 'approved']], {
       status: 'merged',
       closedAt: ago(age),
     });
   };
 
-  // GetNota · board
-  open('getnota-api', 1287, 'feat: validate e-invoices on receipt', MANOEL, DAY, [[PEDRO, 'pending', true], [ANA, 'pending']], { commentCount: 3 });
-  open('getnota-worker', 311, 'feat: exponential retry in the tax authority integration', MANOEL, 2 * DAY, [[PEDRO, 'pending'], [ANA, 'approved']], { targetBranch: 'release/2.14' });
-  open('getnota-web', 642, 'fix: pagination of the invoice list', PEDRO, 3 * HOUR, [[MANOEL, 'waiting-author'], [ANA, 'pending']], { commentCount: 5, mergeState: 'conflicts', conflictCount: 1 });
-  open('getnota-api', 1279, 'refactor: extract the tax calculation service', PEDRO, 4 * DAY, [[MANOEL, 'waiting-author'], [ANA, 'pending']], { commentCount: 7 });
-  open('getnota-web', 650, 'feat: filter by tax ID on the dashboard', PEDRO, 5 * HOUR, [[MANOEL, 'pending'], [ANA, 'pending']], { commentCount: 1 });
+  // Invoicing · board
+  open('invoicing-api', 1287, 'feat: validate e-invoices on receipt', SAM, DAY, [[ALEX, 'pending', true], [AMY, 'pending']], { commentCount: 3 });
+  open('invoicing-worker', 311, 'feat: exponential retry in the tax authority integration', SAM, 2 * DAY, [[ALEX, 'pending'], [AMY, 'approved']], { targetBranch: 'release/2.14' });
+  open('invoicing-web', 642, 'fix: pagination of the invoice list', ALEX, 3 * HOUR, [[SAM, 'waiting-author'], [AMY, 'pending']], { commentCount: 5, mergeState: 'conflicts', conflictCount: 1 });
+  open('invoicing-api', 1279, 'refactor: extract the tax calculation service', ALEX, 4 * DAY, [[SAM, 'waiting-author'], [AMY, 'pending']], { commentCount: 7 });
+  open('invoicing-web', 650, 'feat: filter by tax ID on the dashboard', ALEX, 5 * HOUR, [[SAM, 'pending'], [AMY, 'pending']], { commentCount: 1 });
   // Aberto sem nenhum revisor: fica em "Em revisão" com o aviso no card.
-  open('getnota-api', 1290, 'chore: upgrade Spring Boot to 3.4', MANOEL, DAY + HOUR, []);
-  open('getnota-infra', 88, 'feat: deploy pipeline for staging', PEDRO, 2 * DAY + HOUR, [[MANOEL, 'approved'], [ANA, 'pending']], { targetBranch: 'main', commentCount: 2 });
-  open('getnota-api', 1265, 'feat: export the hours report as CSV', PEDRO, 3 * DAY, [[MANOEL, 'approved'], [ANA, 'pending']], { commentCount: 2, mergeState: 'conflicts', conflictCount: 3 });
-  open('getnota-web', 631, 'fix: ID number mask on sign-up forms', MANOEL, 6 * DAY, [[ANA, 'approved'], [BRUNO, 'approved']], { mergeState: 'conflicts', conflictCount: 1 });
-  open('getnota-worker', 305, 'feat: invoice reprocessing queue', PEDRO, DAY + 2 * HOUR, [[MANOEL, 'approved'], [ANA, 'approved']], { commentCount: 4 });
-  open('getnota-api', 1293, 'hotfix: timeout when issuing service invoices', PEDRO, 2 * HOUR, [[MANOEL, 'approved'], [ANA, 'approved']], { targetBranch: 'main' });
+  open('invoicing-api', 1290, 'chore: upgrade Spring Boot to 3.4', SAM, DAY + HOUR, []);
+  open('invoicing-infra', 88, 'feat: deploy pipeline for staging', ALEX, 2 * DAY + HOUR, [[SAM, 'approved'], [AMY, 'pending']], { targetBranch: 'main', commentCount: 2 });
+  open('invoicing-api', 1265, 'feat: export the hours report as CSV', ALEX, 3 * DAY, [[SAM, 'approved'], [AMY, 'pending']], { commentCount: 2, mergeState: 'conflicts', conflictCount: 3 });
+  open('invoicing-web', 631, 'fix: ID number mask on sign-up forms', SAM, 6 * DAY, [[AMY, 'approved'], [BEN, 'approved']], { mergeState: 'conflicts', conflictCount: 1 });
+  open('invoicing-worker', 305, 'feat: invoice reprocessing queue', ALEX, DAY + 2 * HOUR, [[SAM, 'approved'], [AMY, 'approved']], { commentCount: 4 });
+  open('invoicing-api', 1293, 'hotfix: timeout when issuing service invoices', ALEX, 2 * HOUR, [[SAM, 'approved'], [AMY, 'approved']], { targetBranch: 'main' });
 
-  // GetNota · mergeados e releases
-  merged('getnota-api', 1295, 'feat: cancelled invoices report', PEDRO, DAY);
-  merged('getnota-api', 1294, 'fix: tax ID validation with leading zeros', MANOEL, DAY + HOUR);
-  merged('getnota-api', 1291, 'feat: date range filter on the statement', PEDRO, 2 * DAY);
-  merged('getnota-api', 1289, 'chore: remove the legacy v1 endpoint', MANOEL, 2 * DAY + HOUR);
-  merged('getnota-api', 1286, 'fix: error logging in the tax authority integration', PEDRO, 2 * DAY + 2 * HOUR);
-  merged('getnota-api', 1284, 'feat: cost center registration', PEDRO, 2 * DAY + 5 * HOUR);
-  merged('getnota-api', 1282, 'fix: rounding in the state tax calculation', MANOEL, 2 * DAY + 6 * HOUR);
-  merged('getnota-api', 1276, 'feat: tax authority status webhook', PEDRO, 3 * DAY);
-  merged('getnota-api', 1274, 'chore: update Hibernate dependencies', MANOEL, 3 * DAY + HOUR);
-  merged('getnota-api', 1270, 'fix: duplicates when importing XML', PEDRO, 4 * DAY);
-  merged('getnota-api', 1268, 'feat: audit trail for invoice changes', MANOEL, 4 * DAY + HOUR);
-  merged('getnota-web', 640, 'feat: cost centers screen', PEDRO, 2 * DAY);
-  merged('getnota-web', 638, 'fix: sorting of the invoice grid', MANOEL, 3 * DAY);
-  merged('getnota-web', 633, 'feat: export the grid as CSV', PEDRO, 5 * DAY);
+  // Invoicing · mergeados e releases
+  merged('invoicing-api', 1295, 'feat: cancelled invoices report', ALEX, DAY);
+  merged('invoicing-api', 1294, 'fix: tax ID validation with leading zeros', SAM, DAY + HOUR);
+  merged('invoicing-api', 1291, 'feat: date range filter on the statement', ALEX, 2 * DAY);
+  merged('invoicing-api', 1289, 'chore: remove the legacy v1 endpoint', SAM, 2 * DAY + HOUR);
+  merged('invoicing-api', 1286, 'fix: error logging in the tax authority integration', ALEX, 2 * DAY + 2 * HOUR);
+  merged('invoicing-api', 1284, 'feat: cost center registration', ALEX, 2 * DAY + 5 * HOUR);
+  merged('invoicing-api', 1282, 'fix: rounding in the state tax calculation', SAM, 2 * DAY + 6 * HOUR);
+  merged('invoicing-api', 1276, 'feat: tax authority status webhook', ALEX, 3 * DAY);
+  merged('invoicing-api', 1274, 'chore: update Hibernate dependencies', SAM, 3 * DAY + HOUR);
+  merged('invoicing-api', 1270, 'fix: duplicates when importing XML', ALEX, 4 * DAY);
+  merged('invoicing-api', 1268, 'feat: audit trail for invoice changes', SAM, 4 * DAY + HOUR);
+  merged('invoicing-web', 640, 'feat: cost centers screen', ALEX, 2 * DAY);
+  merged('invoicing-web', 638, 'fix: sorting of the invoice grid', SAM, 3 * DAY);
+  merged('invoicing-web', 633, 'feat: export the grid as CSV', ALEX, 5 * DAY);
 
-  // Lead Comex e Jane · só o suficiente para trocar de projeto
-  open('leadcomex-api', 412, 'feat: batch import of export declarations', MANOEL, 5 * HOUR, [[BRUNO, 'pending'], [ANA, 'pending']], { commentCount: 1 });
-  open('leadcomex-api', 409, 'fix: time zone in deadline calculation', PEDRO, 2 * DAY, [[MANOEL, 'approved'], [ANA, 'approved']]);
-  open('leadcomex-web', 201, 'feat: shipments dashboard', ANA, DAY, [[MANOEL, 'pending'], [BRUNO, 'pending']], { commentCount: 2 });
-  open('leadcomex-web', 198, 'chore: migrate to Vite 7', BRUNO, 3 * DAY, [[ANA, 'approved'], [MANOEL, 'pending']], { mergeState: 'conflicts', conflictCount: 2 });
-  open('jane-api', 77, 'feat: recurring scheduling', MANOEL, 4 * HOUR, [[PEDRO, 'pending'], [BRUNO, 'pending']]);
-  open('jane-api', 75, 'fix: expired token in the webhook', PEDRO, DAY, [[MANOEL, 'waiting-author'], [ANA, 'pending']], { commentCount: 3 });
-  open('jane-api', 73, 'refactor: split out the notifications module', ANA, 2 * DAY, [[MANOEL, 'pending'], [BRUNO, 'approved']]);
-  open('jane-app', 150, 'feat: dark mode', BRUNO, 6 * HOUR, [[ANA, 'pending'], [MANOEL, 'pending']], { commentCount: 4 });
-  open('jane-app', 148, 'fix: keyboard covering the search field', PEDRO, 2 * DAY, [[ANA, 'approved'], [BRUNO, 'approved']]);
-  open('jane-app', 146, 'feat: push notifications', ANA, 3 * DAY, [[MANOEL, 'approved'], [BRUNO, 'pending']], { mergeState: 'conflicts', conflictCount: 1 });
-  open('jane-app', 141, 'chore: update the Expo SDK', MANOEL, 5 * DAY, [[ANA, 'approved'], [BRUNO, 'approved']]);
+  // Trade Desk e Scheduler · só o suficiente para trocar de projeto
+  open('trade-api', 412, 'feat: batch import of export declarations', SAM, 5 * HOUR, [[BEN, 'pending'], [AMY, 'pending']], { commentCount: 1 });
+  open('trade-api', 409, 'fix: time zone in deadline calculation', ALEX, 2 * DAY, [[SAM, 'approved'], [AMY, 'approved']]);
+  open('trade-web', 201, 'feat: shipments dashboard', AMY, DAY, [[SAM, 'pending'], [BEN, 'pending']], { commentCount: 2 });
+  open('trade-web', 198, 'chore: migrate to Vite 7', BEN, 3 * DAY, [[AMY, 'approved'], [SAM, 'pending']], { mergeState: 'conflicts', conflictCount: 2 });
+  open('scheduler-api', 77, 'feat: recurring scheduling', SAM, 4 * HOUR, [[ALEX, 'pending'], [BEN, 'pending']]);
+  open('scheduler-api', 75, 'fix: expired token in the webhook', ALEX, DAY, [[SAM, 'waiting-author'], [AMY, 'pending']], { commentCount: 3 });
+  open('scheduler-api', 73, 'refactor: split out the notifications module', AMY, 2 * DAY, [[SAM, 'pending'], [BEN, 'approved']]);
+  open('scheduler-app', 150, 'feat: dark mode', BEN, 6 * HOUR, [[AMY, 'pending'], [SAM, 'pending']], { commentCount: 4 });
+  open('scheduler-app', 148, 'fix: keyboard covering the search field', ALEX, 2 * DAY, [[AMY, 'approved'], [BEN, 'approved']]);
+  open('scheduler-app', 146, 'feat: push notifications', AMY, 3 * DAY, [[SAM, 'approved'], [BEN, 'pending']], { mergeState: 'conflicts', conflictCount: 1 });
+  open('scheduler-app', 141, 'chore: update the Expo SDK', SAM, 5 * DAY, [[AMY, 'approved'], [BEN, 'approved']]);
 
   const releases: MemoryRelease[] = [
     {
       name: 'release/2.15',
-      repositoryId: 'r-getnota-api',
+      repositoryId: 'r-invoicing-api',
       createdAt: ago(2 * DAY + 3 * HOUR),
-      createdBy: MANOEL,
+      createdBy: SAM,
       baseBranch: 'develop',
       pullRequestIds: [1284, 1282, 1276, 1274, 1270, 1268],
     },
     {
       name: 'release/2.14',
-      repositoryId: 'r-getnota-api',
+      repositoryId: 'r-invoicing-api',
       createdAt: ago(16 * DAY),
-      createdBy: PEDRO,
+      createdBy: ALEX,
       baseBranch: 'develop',
       pullRequestIds: [],
     },
     {
       name: 'release/1.8',
-      repositoryId: 'r-getnota-web',
+      repositoryId: 'r-invoicing-web',
       createdAt: ago(4 * DAY),
-      createdBy: PEDRO,
+      createdBy: ALEX,
       baseBranch: 'develop',
       pullRequestIds: [633],
     },
@@ -185,7 +185,7 @@ export function createWorld(now = Date.now()): World {
     state: MemoryWorkItem['state'],
     parentId?: number,
     pullRequestIds: number[] = [],
-  ): MemoryWorkItem => ({ id, title, kind, state, parentId, projectId: 'p-getnota', pullRequestIds });
+  ): MemoryWorkItem => ({ id, title, kind, state, parentId, projectId: 'p-invoicing', pullRequestIds });
 
   const workItems: MemoryWorkItem[] = [
     item(48120, 'Cost centers in company registration', 'pbi', testing),
@@ -208,5 +208,5 @@ export function createWorld(now = Date.now()): World {
     item(48148, 'Tax ID validation rejects leading zeros', 'bug', done, 48140),
   ];
 
-  return { me: PEDRO, projects, repositories, pullRequests, releases, workItems };
+  return { me: ALEX, projects, repositories, pullRequests, releases, workItems };
 }

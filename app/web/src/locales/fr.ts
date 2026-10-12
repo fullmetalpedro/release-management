@@ -288,7 +288,7 @@ export const fr: Catalog = {
           "Choisissez de créer un jeton d'API avec des étendues (Create API token with scopes), nommez-le et définissez l'expiration (1 an maximum).",
           "Dans le choix de l'application (Select app), sélectionnez Jira.",
           'Cochez les étendues ci-dessous et créez le jeton :',
-          "Copiez le jeton et collez-le dans le champ Jira, avec l'e-mail du compte et le site (ex. : muralis.atlassian.net). Il ne s'affiche qu'une fois.",
+          "Copiez le jeton et collez-le dans le champ Jira, avec l'e-mail du compte et le site (ex. : acme.atlassian.net). Il ne s'affiche qu'une fois.",
         ],
         scopes: [
           { name: 'read:jira-work', level: 'Lecture', description: 'Lire et rechercher les tickets liés aux PR' },

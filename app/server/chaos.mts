@@ -44,7 +44,7 @@ const HOSTILE = [
   '', ' ', '0', '-1', '1e309', 'NaN', 'null', 'undefined', 'true', '[]', '{}', '__proto__', 'constructor', 'toString',
   '..', '../..', '..%2f..%2f', '%2e%2e%2f', '%252e%252e', '..%5c', '%00', 'a%00b', '%0d%0aSet-Cookie:x=1', '%E0%A4%A', '%',
   'a'.repeat(5000), '😀'.repeat(200), "' OR 1=1--", '"><script>alert(1)</script>', '${7*7}', '{{7*7}}', '%7B%7B7*7%7D%7D',
-  'p-getnota', 'r-getnota-api', 'p-getnota/../p-jane', 'http://evil.com', '//evil.com', '?x=1', '#x', ';x', 'a b', 'a+b', 'ａ',
+  'p-invoicing', 'r-invoicing-api', 'p-invoicing/../p-scheduler', 'http://evil.com', '//evil.com', '?x=1', '#x', ';x', 'a b', 'a+b', 'ａ',
 ];
 const BODIES: unknown[] = [
   undefined, null, 0, '', 'x', [], {}, { name: null }, { name: 1, pullRequestIds: 'x' }, { name: 'release/9.9', pullRequestIds: [1e308] },
@@ -90,8 +90,8 @@ const write = (cookie: string, json = true) => ({ cookie, 'x-requested-with': 'f
   const { app, sessions, base, port } = await start({ AUTH_MODE: 'demo' });
   const login = await hit(base, 'demo', '/auth/microsoft/login');
   const cookie = cookieOf(login!.headers)!;
-  const P = '/api/projects/p-getnota';
-  const R = `${P}/repositories/r-getnota-api`;
+  const P = '/api/projects/p-invoicing';
+  const R = `${P}/repositories/r-invoicing-api`;
 
   // --- Sem sessão, toda rota de API responde 401 ---
   for (const path of ['/api/me', '/api/projects', `${P}/board`, `${P}/lanes`, `${R}/lane`, `${R}/release`, `${P}/work-items?q=a`, '/api/avatars/x', '/api/nada']) {
@@ -208,13 +208,13 @@ const write = (cookie: string, json = true) => ({ cookie, 'x-requested-with': 'f
 {
   let validations = 0;
   const { app, base } = await start(
-    { SESSION_SECRET: 'x'.repeat(32), AZDO_ORG: 'muralisti' },
+    { SESSION_SECRET: 'x'.repeat(32), AZDO_ORG: 'acme' },
     {
       authAttemptsPerMinute: 1_000_000,
       validatePat: async () => {
         validations += 1;
         await new Promise((resolve) => setTimeout(resolve, 20));
-        return { owner: { id: 'u1', name: 'Pedro', email: 'p@m.com' }, cloudId: '11111111-2222-3333-4444-555555555555' };
+        return { owner: { id: 'u1', name: 'Alex', email: 'p@m.com' }, cloudId: '11111111-2222-3333-4444-555555555555' };
       },
     },
   );
@@ -233,7 +233,7 @@ const write = (cookie: string, json = true) => ({ cookie, 'x-requested-with': 'f
 
   // --- Mesmo envelope enviado 15 vezes ao mesmo tempo: só um pode valer ---
   const shared = await envelope(token);
-  const replays = await Promise.all(Array.from({ length: 15 }, () => connect('azure-devops', { organization: 'muralisti', encryptedToken: shared })));
+  const replays = await Promise.all(Array.from({ length: 15 }, () => connect('azure-devops', { organization: 'acme', encryptedToken: shared })));
   const accepted = replays.filter((r) => r?.status === 200).length;
   if (accepted !== 1) note('envelope reaproveitado em corrida', `${accepted} aceitos de 15 (esperado 1)`);
 
@@ -246,13 +246,13 @@ const write = (cookie: string, json = true) => ({ cookie, 'x-requested-with': 'f
     mutants.push(flipped.toString('base64'));
   }
   for (const mutant of mutants) {
-    const response = await connect('azure-devops', { organization: 'muralisti', encryptedToken: mutant });
+    const response = await connect('azure-devops', { organization: 'acme', encryptedToken: mutant });
     if (response?.status === 200) note('envelope adulterado aceito', mutant.slice(0, 40));
   }
-  for (const encryptedToken of [null, 1, [], {}, true]) await connect('azure-devops', { organization: 'muralisti', encryptedToken });
+  for (const encryptedToken of [null, 1, [], {}, true]) await connect('azure-devops', { organization: 'acme', encryptedToken });
   // --- Token dentro do envelope com conteúdo hostil ---
   for (const inner of ['', ' ', 'a'.repeat(19), 'a'.repeat(401), 'a'.repeat(5000), 'tok\r\nX-Injected: 1' + 'a'.repeat(30), 'tok\u0000' + 'a'.repeat(30), '😀'.repeat(30)]) {
-    const response = await connect('azure-devops', { organization: 'muralisti', encryptedToken: await envelope(inner) });
+    const response = await connect('azure-devops', { organization: 'acme', encryptedToken: await envelope(inner) });
     if (response?.status === 200 && /[\r\n\u0000]/.test(inner)) note('token com caractere de controle aceito', JSON.stringify(inner.slice(0, 30)));
   }
   // --- Contas hostis ---
@@ -261,10 +261,10 @@ const write = (cookie: string, json = true) => ({ cookie, 'x-requested-with': 'f
       const response = await connect(provider, { organization: value, site: value, email: value, encryptedToken: 'x' });
       if (response?.status === 200) note('conta hostil aceita', `${provider} ${value.slice(0, 40)}`);
     }
-    for (const account of [null, 1, [], { organization: {} }, { organization: ['a'] }, { site: 'muralis.atlassian.net', email: { $ne: '' } }]) await connect(provider, account);
+    for (const account of [null, 1, [], { organization: {} }, { organization: ['a'] }, { site: 'acme.atlassian.net', email: { $ne: '' } }]) await connect(provider, account);
   }
   // --- Trocar a plataforma ativa com valores hostis ---
-  const session = cookieOf((await connect('azure-devops', { organization: 'muralisti', encryptedToken: await envelope(token) }))!.headers)!;
+  const session = cookieOf((await connect('azure-devops', { organization: 'acme', encryptedToken: await envelope(token) }))!.headers)!;
   for (const body of BODIES) await hit(base, 'ativa', '/auth/active', { method: 'POST', headers: write(session), body: body === undefined ? undefined : JSON.stringify(body) });
   const me = await hit(base, 'me', '/api/me', { headers: { cookie: session }, expect: [200] });
   if (me && me.text.includes(token)) note('token devolvido ao cliente', '/api/me');

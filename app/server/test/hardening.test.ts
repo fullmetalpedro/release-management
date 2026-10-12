@@ -4,7 +4,7 @@ import { JsonClient, ProviderHttpError } from '../src/adapters/http-json.ts';
 import { PatTransport } from '../src/adapters/http/patTransport.ts';
 import { buildServer } from '../src/adapters/http/server.ts';
 import { toStateCategory } from '../src/adapters/azure-devops/workTracking.ts';
-import { MANOEL, PEDRO } from '../src/adapters/memory/world.ts';
+import { SAM, ALEX } from '../src/adapters/memory/world.ts';
 import { SessionStore } from '../src/adapters/session/sessionStore.ts';
 import { loadConfig } from '../src/config.ts';
 import { NotAuthenticatedError, ValidationError } from '../src/core/domain/errors.ts';
@@ -92,7 +92,7 @@ describe('servidor: entradas hostis', () => {
     }
     const link = await app.inject({
       method: 'PUT',
-      url: '/api/projects/p-getnota/repositories/r-getnota-api/pull-requests/12abc/work-items/1',
+      url: '/api/projects/p-invoicing/repositories/r-invoicing-api/pull-requests/12abc/work-items/1',
       headers: write(cookie),
     });
     expect(link.statusCode).toBe(400);
@@ -100,7 +100,7 @@ describe('servidor: entradas hostis', () => {
 
   it('limita a lista de PRs de uma release', async () => {
     const { app, cookie } = await demoServer();
-    const url = '/api/projects/p-getnota/repositories/r-getnota-api/releases';
+    const url = '/api/projects/p-invoicing/repositories/r-invoicing-api/releases';
     const post = (pullRequestIds: unknown) => app.inject({ method: 'POST', url, headers: write(cookie), payload: { name: 'release/9.9', pullRequestIds } });
     expect((await post(Array.from({ length: 101 }, (_, i) => i + 1))).statusCode).toBe(400);
     expect((await post([])).statusCode).toBe(400);
@@ -112,12 +112,12 @@ describe('servidor: entradas hostis', () => {
     const { app, cookie } = await demoServer();
     const malformed = await app.inject({
       method: 'POST',
-      url: '/api/projects/p-getnota/repositories/r-getnota-api/releases',
+      url: '/api/projects/p-invoicing/repositories/r-invoicing-api/releases',
       headers: { ...write(cookie), 'content-type': 'application/json' },
       payload: '{"name":',
     });
     expect(malformed.statusCode).toBe(400);
-    const repeated = await app.inject({ method: 'GET', url: '/api/projects/p-getnota/work-items?q=a&q=b', headers: { cookie } });
+    const repeated = await app.inject({ method: 'GET', url: '/api/projects/p-invoicing/work-items?q=a&q=b', headers: { cookie } });
     expect(repeated.statusCode).toBe(200);
   });
 
@@ -193,7 +193,7 @@ describe('regras revistas', () => {
     repository: { id: 'r', name: 'r', projectId: 'p' },
     sourceBranch: 'f',
     targetBranch: 'develop',
-    author: MANOEL,
+    author: SAM,
     createdAt: '2026-10-01T00:00:00Z',
     status: 'open',
     isDraft: false,
@@ -204,19 +204,19 @@ describe('regras revistas', () => {
     webUrl: '',
     ...overrides,
   });
-  const colleague = { ...MANOEL, id: 'colega' };
+  const colleague = { ...SAM, id: 'colega' };
 
   it('revisor obrigatório com voto pendente segura o PR mesmo com o mínimo de aprovações atingido', () => {
     const reviews = [
-      { reviewer: PEDRO, decision: 'pending' as const, required: true },
+      { reviewer: ALEX, decision: 'pending' as const, required: true },
       { reviewer: colleague, decision: 'approved' as const, required: false },
     ];
-    expect(classify(pull({ requiredApprovals: 1, reviews }), PEDRO)).toEqual({ column: 'dependsOnMe', reason: 'reviewer' });
+    expect(classify(pull({ requiredApprovals: 1, reviews }), ALEX)).toEqual({ column: 'dependsOnMe', reason: 'reviewer' });
   });
 
   it('rascunho aprovado não está pronto para merge', () => {
     const reviews = [{ reviewer: colleague, decision: 'approved' as const, required: false }];
-    expect(classify(pull({ isDraft: true, reviews }), PEDRO).column).toBe('review');
+    expect(classify(pull({ isDraft: true, reviews }), ALEX).column).toBe('review');
   });
 
   it('estado concluído não vira "em teste" pelo nome', () => {
@@ -228,7 +228,7 @@ describe('regras revistas', () => {
     const branching = { developBranch: 'develop', baseBranches: ['main'], releasePattern: DEFAULT_RELEASE_PATTERN, firstRelease: 'release/1.0' };
     const sourceControl = new MemorySourceControl(createWorld());
     await expect(
-      createRelease({ sourceControl }, { projectId: 'p-getnota', repositoryId: 'r-getnota-api', name: 'release/2.16-hotfix', pullRequestIds: [1295], branching }),
+      createRelease({ sourceControl }, { projectId: 'p-invoicing', repositoryId: 'r-invoicing-api', name: 'release/2.16-hotfix', pullRequestIds: [1295], branching }),
     ).rejects.toThrow(ValidationError);
   });
 
@@ -263,7 +263,7 @@ describe('envelope montado com WebCrypto, como no navegador', () => {
 describe('PR sem revisor', () => {
   it('fica em revisão e o card avisa que ninguém foi chamado para revisar', async () => {
     const { getBoard } = await import('../src/core/usecases/board.ts');
-    const board = await getBoard({ sourceControl: new MemorySourceControl(createWorld()) }, 'p-getnota');
+    const board = await getBoard({ sourceControl: new MemorySourceControl(createWorld()) }, 'p-invoicing');
     const card = board.columns.review.find((pr) => pr.id === 1290);
     expect(card).toMatchObject({ noReviewers: true, approved: false });
     expect(board.columns.review.filter((pr) => pr.id !== 1290).every((pr) => !pr.noReviewers)).toBe(true);
@@ -285,7 +285,7 @@ describe('achados do teste de caos', () => {
     const create = () =>
       app.inject({
         method: 'POST',
-        url: '/api/projects/p-getnota/repositories/r-getnota-api/releases',
+        url: '/api/projects/p-invoicing/repositories/r-invoicing-api/releases',
         headers: { cookie, 'x-requested-with': 'fetch' },
         payload: { name: 'release/2.16', pullRequestIds: [1295, 1294] },
       });
@@ -338,7 +338,7 @@ describe('achados do teste de caos', () => {
         method: 'POST',
         url: '/auth/pat/github',
         headers: { 'x-requested-with': 'fetch' },
-        payload: { organization: 'muralis', encryptedToken: Buffer.concat([wrapped, iv, sealed, cipher.getAuthTag()]).toString('base64') },
+        payload: { organization: 'acme', encryptedToken: Buffer.concat([wrapped, iv, sealed, cipher.getAuthTag()]).toString('base64') },
       });
       expect(response.statusCode).toBe(400);
     }

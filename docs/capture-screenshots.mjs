@@ -66,7 +66,7 @@ try {
   await go(`${DEMO}/auth/microsoft/login`);
   await run(`
     for (const key of Object.keys(localStorage)) if (key.startsWith('rm.')) localStorage.removeItem(key);
-    localStorage.setItem('rm.repoColors', JSON.stringify({ 'p-getnota': { 'r-getnota-api': '#3B82F6', 'r-getnota-web': '#EC4899', 'r-getnota-worker': '#65A30D' } }));
+    localStorage.setItem('rm.repoColors', JSON.stringify({ 'p-invoicing': { 'r-invoicing-api': '#3B82F6', 'r-invoicing-web': '#EC4899', 'r-invoicing-worker': '#65A30D' } }));
   `);
   await go(`${DEMO}/`, 3500);
   await shot('board');
@@ -79,7 +79,7 @@ try {
   await run(`document.querySelector('[aria-label$="PR #1295"]').click(); await wait(150); document.querySelector('[aria-label$="PR #1294"]').click(); await wait(400);`);
   await shot('create-release', { x: 760, y: 150, width: 680, height: 750 });
 
-  await go(`${DEMO}/release?repo=r-getnota-api`, 3500);
+  await go(`${DEMO}/release?repo=r-invoicing-api`, 3500);
   await shot('release');
   await run(`button(/^(Link task|Vincular task|Lier)/).click(); await wait(1800);`);
   await shot('link-task', { x: 20, y: 440, width: 900, height: 460 });

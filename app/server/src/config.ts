@@ -92,7 +92,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     return {
       ...base,
       demo,
-      projects: base.projects.length > 0 ? base.projects : ['GetNota', 'Lead Comex', 'Jane'],
+      projects: base.projects.length > 0 ? base.projects : ['Invoicing', 'Trade Desk', 'Scheduler'],
       organization: 'demo',
       // As sessões de demonstração valem só enquanto o processo vive.
       sessionSecret: env.SESSION_SECRET?.trim() || randomBytes(32).toString('hex'),

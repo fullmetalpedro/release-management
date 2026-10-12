@@ -287,7 +287,7 @@ export const en: Catalog = {
           'Select Create API token with scopes, give it a name and set the expiration (up to 1 year).',
           'Under Select app, choose Jira.',
           'Select the scopes below and create the token:',
-          "Copy the token and paste it into the Jira field, along with your account email and site (e.g. muralis.atlassian.net). It's only shown once.",
+          "Copy the token and paste it into the Jira field, along with your account email and site (e.g. acme.atlassian.net). It's only shown once.",
         ],
         scopes: [
           { name: 'read:jira-work', level: 'Read', description: 'Read and search the work items linked to PRs' },

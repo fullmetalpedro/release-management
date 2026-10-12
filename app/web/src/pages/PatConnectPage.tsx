@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AzureDevOpsLogo, GitHubLogo, JiraLogo } from '../components/logos';
+import { AppMark, AzureDevOpsLogo, GitHubLogo, JiraLogo } from '../components/logos';
 import { useToast } from '../components/toast';
 import { cx } from '../components/ui';
 import type { Me, ProviderId } from '../lib/api';
@@ -563,9 +563,9 @@ export function PatConnectPage({ defaultOrganization }: { defaultOrganization: s
         )}
       >
         <div className="flex min-w-0 flex-1 flex-col gap-5 px-10 py-7 short:gap-4 short:py-5">
-          {/* Logo ao lado do título: a largura sobra, a altura não. */}
+          {/* Marca ao lado do título: a largura sobra, a altura não. */}
           <div className="flex items-center gap-5">
-            <img src="/muralis-logo-full.png" alt="Muralis" className="h-[3.875rem] w-[6.875rem] shrink-0 object-contain" />
+            <AppMark size={48} />
             <h1 className="min-w-0 text-2xl font-bold tracking-[-0.4px] text-ink">Release Management</h1>
           </div>
 

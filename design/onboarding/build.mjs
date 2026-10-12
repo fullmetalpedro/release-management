@@ -318,13 +318,11 @@ const toastSheet = ':host{background:transparent!important}*{visibility:hidden}[
 
 // ---------------------------------------------------------------- telas capturadas
 
-const logo = `data:image/png;base64,${b64(join(here, '..', 'releaseManagement-assets', 'muralis-logo-full.png'))}`;
 const TOAST = /<li[^>]*data-sonner-toast=[\s\S]*?<\/li>/g;
 // Tira os toasts da captura, menos o que tiver `keep` no texto (para a camada do toast).
 const clean = (html, keep) =>
   html
     .replace(TOAST, (toast) => (keep && toast.includes(keep) ? toast : ''))
-    .replace(/src="\/muralis-logo-full\.png"/g, `src="${logo}"`)
     .replace(/<img[^>]*src="\/api\/avatars[^"]*"[^>]*>/g, '');
 const attr = (value) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 const host = (cls, html, extra = '') => `<div class="snap ${cls}"${extra}><template data-snap>${html}</template></div>`;
@@ -384,7 +382,7 @@ ${css}
 <body>
 <div class="frame" id="frame">
   <div class="window">
-    <div class="chrome"><i></i><i></i><i></i><div class="url"><span class="url-login">www.release-management.com/login</span><span class="url-board">www.release-management.com/</span><span class="url-release">www.release-management.com/release?repo=getnota-api</span></div></div>
+    <div class="chrome"><i></i><i></i><i></i><div class="url"><span class="url-login">www.release-management.com/login</span><span class="url-board">www.release-management.com/</span><span class="url-release">www.release-management.com/release?repo=invoicing-api</span></div></div>
     <div class="screens">
 ${screens}
     </div>
@@ -397,7 +395,7 @@ ${screens}
   <div class="bar"><i class="progress"></i></div>
   <div class="cur"><div class="cur-ring"></div><svg class="cur-press" width="22" height="26" viewBox="0 0 22 26"><path d="M3 2 L3 20 L8 15.5 L11.5 23.5 L15 22 L11.5 14 L18 14 Z" fill="#0F172A" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
   <div class="intro">
-    <div class="intro-a"><small>Tour · Muralis</small><h2>Release Management</h2><p>Do token pessoal à análise da release, em ${STEPS.length} passos.</p><button type="button" id="start">Começar</button></div>
+    <div class="intro-a"><small>Tour</small><h2>Release Management</h2><p>Do token pessoal à análise da release, em ${STEPS.length} passos.</p><button type="button" id="start">Começar</button></div>
     <div class="intro-b"><small>Pronto</small><h2>Code review e releases num só lugar</h2><p>Board, branch de release e vínculo de tasks, sem sair da ferramenta.</p><button type="button" id="again">Ver de novo</button></div>
   </div>
 </div>
