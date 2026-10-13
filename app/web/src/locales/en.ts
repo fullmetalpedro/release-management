@@ -257,6 +257,7 @@ export const en: Catalog = {
           { name: 'Code', level: 'Read & write', description: 'Read PRs and create the release branch' },
           { name: 'Work Items', level: 'Read & write', description: 'Read work items and link them to PRs' },
           { name: 'Project and Team', level: 'Read', description: "List the organization's projects" },
+          { name: 'Identity', level: 'Read', description: 'Show profile photos' },
         ],
         note: "A token can only do what your account already can. To create releases you also need the Contribute and Create branch permissions on the repository.",
       },

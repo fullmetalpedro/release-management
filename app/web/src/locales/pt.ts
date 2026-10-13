@@ -255,6 +255,7 @@ export const pt = {
           { name: 'Code', level: 'Read & Write', description: 'Ler PRs e criar a branch de release' },
           { name: 'Work Items', level: 'Read & Write', description: 'Ler e vincular work items aos PRs' },
           { name: 'Project and Team', level: 'Read', description: 'Listar os projetos da organização' },
+          { name: 'Identity', level: 'Read', description: 'Mostrar as fotos de perfil' },
         ],
         note: 'O token só faz o que a sua conta já pode fazer. Para criar releases, você ainda precisa das permissões Contribute e Create branch no repositório.',
       },
