@@ -258,6 +258,7 @@ export const fr: Catalog = {
           { name: 'Code', level: 'Lecture et écriture', description: 'Lire les PR et créer la branche de release' },
           { name: 'Éléments de travail', level: 'Lecture et écriture', description: 'Lire les éléments de travail et les lier aux PR' },
           { name: 'Projet et équipe', level: 'Lecture', description: "Lister les projets de l'organisation" },
+          { name: 'Identité', level: 'Lecture', description: 'Afficher les photos de profil' },
         ],
         note: 'Un jeton ne peut pas faire plus que votre compte. Pour créer des releases, il vous faut aussi les autorisations Contribuer et Créer une branche sur le référentiel.',
       },
