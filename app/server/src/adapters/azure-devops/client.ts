@@ -75,9 +75,8 @@ export class AzureDevOpsClient {
         await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs * attempt));
       }
     }
-    if (response.status === 401 || (response.status >= 300 && response.status < 400)) {
-      throw new NotAuthenticatedError(msg('sessionTokenRejected', { provider: 'Azure DevOps' }));
-    }
+    // Foto recusada (escopo Graph ausente no token, por exemplo) é só foto que falta: não derruba a sessão.
+    if (response.status === 401 || (response.status >= 300 && response.status < 400)) return undefined;
     const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
     if (!response.ok || !contentType.startsWith('image/')) return undefined;
     return { contentType, data: Buffer.from(await response.arrayBuffer()) };
