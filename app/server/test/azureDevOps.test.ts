@@ -135,13 +135,16 @@ describe('pull requests', () => {
     const { client, calls } = fakeAzure({
       'GET /_apis/GraphProfile/MemberAvatars/aad.ZTNjMTJlAbCdEf': () => new Response(png, { status: 200, headers: { 'content-type': 'image/png; api-version=7.1' } }),
       'GET /_apis/GraphProfile/MemberAvatars/aad.semFotoAbCdEf': () => new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } }),
+      'GET /_apis/GraphProfile/MemberAvatars/aad.recusadaAbCdEf': () => new Response('', { status: 401 }),
     });
     const sourceControl = new AzureDevOpsSourceControl(client, options);
 
     expect(await sourceControl.getAvatar('aad.ZTNjMTJlAbCdEf')).toEqual({ contentType: 'image/png', data: png });
     expect(await sourceControl.getAvatar('aad.semFotoAbCdEf')).toBeUndefined();
+    // Token sem escopo para fotos: vira foto ausente, não sessão derrubada.
+    expect(await sourceControl.getAvatar('aad.recusadaAbCdEf')).toBeUndefined();
     expect(await sourceControl.getAvatar('../../_apis/projects')).toBeUndefined();
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
   });
 
   it('extrai os ids dos PRs das mensagens de commit', () => {
