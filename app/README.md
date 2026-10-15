@@ -25,6 +25,23 @@ To check the adapter against a real organization without writing anything, with 
 
 To see the interface with fictitious data and no platform at all, start it with `AUTH_MODE=demo`.
 
+## Running with Docker
+
+The image builds the front end and serves everything from the API on port 3001, as `npm run build` and `npm start` do.
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+Open http://localhost:3001. Before starting, set in `.env`:
+
+- `APP_URL=http://localhost:3001`, the URL the browser uses.
+- `SESSION_SECRET`, so sessions survive a restart. They are kept encrypted in the `data` volume.
+- `AZDO_ORG`, optional, to fill in the organization on the sign-in screen.
+
+After changing `.env`, run `docker compose up -d` again. `docker compose down -v` also deletes the volume and, with it, every session.
+
 ## Connecting to Azure DevOps with a Microsoft account
 
 1. In Microsoft Entra ID, create an **App registration** (single tenant, the same tenant linked to the Azure DevOps organization).
