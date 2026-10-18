@@ -5,9 +5,9 @@ import { GitHubSourceControl } from './adapters/github/sourceControl.ts';
 import { JiraWorkTracking, NoWorkTracking } from './adapters/jira/workTracking.ts';
 import { MemorySourceControl, MemoryWorkTracking } from './adapters/memory/memoryAdapters.ts';
 import { createWorld } from './adapters/memory/world.ts';
-import type { PatProvider, Session, SessionStore } from './adapters/session/sessionStore.ts';
+import { connectionOf, type PatConnection, type Session, type SessionStore } from './adapters/session/sessionStore.ts';
 import type { AppConfig } from './config.ts';
-import { NotAuthenticatedError, ValidationError } from './core/domain/errors.ts';
+import { ConnectionExpiredError, NotAuthenticatedError, ValidationError } from './core/domain/errors.ts';
 import type { IdentityProvider, TokenSet } from './core/ports/identityProvider.ts';
 import type { SourceControl } from './core/ports/sourceControl.ts';
 import type { WorkTracking } from './core/ports/workTracking.ts';
@@ -58,34 +58,44 @@ export class ConnectionRegistry {
   }
 
   // Abre o token de uma conexão no instante do uso; se ela sumiu da sessão, a chamada falha como não autenticada.
-  private token(sessionId: string, provider: PatProvider): string {
-    const connection = this.sessions.get(sessionId)?.connections?.[provider];
+  private token(sessionId: string, id: string): string {
+    const connection = connectionOf(this.sessions.get(sessionId), id);
     if (!connection) throw new NotAuthenticatedError();
+    if (connection.expiredAt) throw new ConnectionExpiredError(id, connection.account);
     return this.sessions.open(connection.sealedToken);
   }
 
-  // No modo token, a plataforma ativa fornece os PRs. As tarefas vêm do próprio Azure DevOps ou,
+  // No modo token, a conexão ativa fornece os PRs. As tarefas vêm do próprio Azure DevOps ou,
   // com o GitHub ativo, do Jira (se estiver conectado).
   private patConnection(session: Session): Connection {
     const connections = session.connections ?? {};
     const { branching } = this.config;
+    const id = session.activeConnection;
+    const active = connectionOf(session, id);
 
-    if (session.activeSource === 'azure-devops' && connections['azure-devops']) {
-      return this.azureDevOps(connections['azure-devops'].account, async () =>
-        basicFromPat(this.token(session.id, 'azure-devops')),
-      );
+    if (id && active?.provider === 'azure-devops') {
+      const { sourceControl, workTracking } = this.azureDevOps(active.account, async () => basicFromPat(this.token(session.id, id)));
+      return { sourceControl: expiringAs(id, active, sourceControl), workTracking: expiringAs(id, active, workTracking) };
     }
-    if (session.activeSource === 'github' && connections.github) {
-      const jira = connections.jira;
+    if (id && active?.provider === 'github') {
+      const [jiraId, jira] = Object.entries(connections).find(([, connection]) => connection.provider === 'jira') ?? [];
       return {
-        sourceControl: new GitHubSourceControl(
-          { owner: connections.github.account, releasePattern: branching.releasePattern, developBranch: branching.developBranch },
-          async () => this.token(session.id, 'github'),
+        sourceControl: expiringAs(
+          id,
+          active,
+          new GitHubSourceControl(
+            { owner: active.account, releasePattern: branching.releasePattern, developBranch: branching.developBranch },
+            async () => this.token(session.id, id),
+          ),
         ),
         workTracking:
-          jira?.cloudId && jira.email
-            ? new JiraWorkTracking({ site: jira.account, cloudId: jira.cloudId, email: jira.email }, async () =>
-                this.token(session.id, 'jira'),
+          jiraId && jira?.cloudId && jira.email
+            ? expiringAs(
+                jiraId,
+                jira,
+                new JiraWorkTracking({ site: jira.account, cloudId: jira.cloudId, email: jira.email }, async () =>
+                  this.token(session.id, jiraId),
+                ),
               )
             : new NoWorkTracking(),
       };
@@ -124,4 +134,25 @@ export class ConnectionRegistry {
     }
     return (await pending).accessToken;
   }
+}
+
+// Um token recusado pelo provedor vira a expiração daquela conexão, e não da sessão: o erro diz qual conexão caiu.
+export function expiringAs<T extends object>(id: string, connection: PatConnection, target: T): T {
+  const expired = (error: unknown) => {
+    throw error instanceof NotAuthenticatedError ? new ConnectionExpiredError(id, connection.account) : error;
+  };
+  return new Proxy(target, {
+    get(object, property, receiver) {
+      const value = Reflect.get(object, property, receiver);
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        try {
+          const result = value.apply(object, args);
+          return result instanceof Promise ? result.catch(expired) : result;
+        } catch (error) {
+          return expired(error);
+        }
+      };
+    },
+  });
 }

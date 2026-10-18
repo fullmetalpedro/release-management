@@ -186,12 +186,20 @@ export const pt = {
     accounts: 'CONTAS',
     noAccount: 'Nenhuma conta conectada',
     connect: 'Conectar',
-    showPrsFrom: 'Ver os PRs do {{provider}}',
-    switchFailed: 'Não foi possível trocar para {{provider}}',
+    showPrsFrom: 'Ver os PRs de {{account}}',
+    switchFailed: 'Não foi possível trocar para {{account}}',
     logoutFailed: "Não foi possível sair",
     unavailable: 'Conexão com {{provider}} ainda não disponível',
     unavailableBody: 'Entre com token pessoal para conectar outras plataformas.',
     signOut: 'Sair',
+    organizations_one: '{{count}} organização',
+    organizations_other: '{{count}} organizações',
+    activeShowing: 'Ativa · Mostrando os PRs',
+    connected: 'Conectado',
+    expiredOn: 'Token expirou em {{date}}',
+    reconnect: 'Reconectar',
+    jiraGroup: 'JIRA · TAREFAS VINCULADAS AOS PRS',
+    connectAnother: 'Conectar outra organização',
   },
   login: {
     methods: 'Forma de entrar',
@@ -219,16 +227,29 @@ export const pt = {
     connectedToast: '{{name}} conectado em {{account}}',
     connectedToastBody: 'Token validado para {{user}}.',
     guideTabs: 'Guia do token',
+    orgCount_one: '1 organização · {{account}}',
+    orgCount_other: '{{count}} conectadas',
+    expiredCount_one: '{{count}} expirada',
+    expiredCount_other: '{{count}} expiradas',
+    orgActive: 'Ativa · Mostrando os PRs',
+    orgConnected: 'Conectada',
+    orgExpired: 'Token expirou em {{date}}',
+    reconnect: 'Reconectar',
+    remove: 'Remover {{account}}',
+    removed: '{{account}} removida',
+    removeFailed: 'Não foi possível remover {{account}}',
+    addOrganization: 'Adicionar organização',
+    usedHere: 'Usadas neste navegador:',
     forms: {
       azureDevOps: {
         organization: 'Organização',
         token: 'Personal Access Token',
-        hint: 'Para usar outra organização, gere um token nela e conecte no lugar deste.',
+        hint: 'Cada organização usa o próprio token. Só os nomes das organizações ficam salvos neste navegador; os tokens nunca.',
       },
       github: {
         owner: 'Organização ou usuário',
         token: 'Fine-grained token',
-        hint: 'Com o GitHub ativo, as tasks vêm do Jira, se ele estiver conectado.',
+        hint: 'Cada organização usa o próprio token. Com o GitHub ativo, as tasks vêm do Jira, se ele estiver conectado.',
       },
       jira: {
         site: 'Site',
@@ -243,7 +264,7 @@ export const pt = {
       azureDevOps: {
         title: 'Token do Azure DevOps',
         description:
-          'O token vale para uma organização só. Para trocar de organização, gere um novo token nela e conecte no lugar do atual.',
+          'Um token vale para uma única organização. Para cada organização que quiser ver no board, crie um token nela e conecte aqui: as organizações conectadas ficam todas disponíveis.',
         steps: [
           'Abra a página de tokens da organização no Azure DevOps.',
           'Clique em New Token e, em Organization, escolha a organização que você quer usar. Não use All accessible organizations.',
@@ -262,7 +283,7 @@ export const pt = {
       github: {
         title: 'Token do GitHub',
         description:
-          'Use um fine-grained token. Ele vale para um dono só; para trocar de organização, gere outro token nela e conecte no lugar do atual.',
+          'Use um fine-grained token. Ele vale para um dono só; para cada organização que quiser ver no board, gere um token nela e conecte aqui.',
         steps: [
           'Abra a página de criação de fine-grained tokens.',
           'Em Resource owner, escolha a organização e defina a validade.',

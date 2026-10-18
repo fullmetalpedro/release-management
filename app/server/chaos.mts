@@ -53,7 +53,7 @@ const BODIES: unknown[] = [
   { name: 'release/../../x', pullRequestIds: [1295] }, { name: 'a'.repeat(10000), pullRequestIds: [1295] }, { name: 'release/2.15', pullRequestIds: [1295] },
   { name: ' release/9.9 ', pullRequestIds: [1295] }, { name: 'release/9.9\u0000', pullRequestIds: [1295] }, { name: 'release/9.9', pullRequestIds: Array.from({ length: 5000 }, (_, i) => i + 1) },
   { __proto__: { admin: true }, name: 'release/9.9', pullRequestIds: [1295] }, JSON.parse('{"__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":1}},"name":"release/9.9","pullRequestIds":[1295]}'),
-  { provider: '__proto__' }, { provider: ['github'] }, { provider: { toString: 1 } },
+  { connectionId: '__proto__' }, { connectionId: 'constructor' }, { connectionId: ['github:acme'] }, { connectionId: { toString: 1 } },
 ];
 
 async function start(env: NodeJS.ProcessEnv, extra: Partial<Parameters<typeof buildServer>[0]> = {}) {
@@ -64,7 +64,7 @@ async function start(env: NodeJS.ProcessEnv, extra: Partial<Parameters<typeof bu
   if (!config.demo) {
     const world = createWorld();
     const real = registry.for.bind(registry);
-    registry.for = (session) => (session.activeSource ? { sourceControl: new MemorySourceControl(world), workTracking: new MemoryWorkTracking(world) } : real(session));
+    registry.for = (session) => (session.activeConnection ? { sourceControl: new MemorySourceControl(world), workTracking: new MemoryWorkTracking(world) } : real(session));
   }
   const app = await buildServer({ config, sessions, registry, webDist: '/nao-existe', ...extra });
   await app.listen({ port: 0, host: '127.0.0.1' });

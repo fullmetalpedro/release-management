@@ -189,12 +189,20 @@ export const fr: Catalog = {
     accounts: 'COMPTES',
     noAccount: 'Aucun compte connecté',
     connect: 'Connecter',
-    showPrsFrom: 'Afficher les PR de {{provider}}',
-    switchFailed: 'Impossible de passer à {{provider}}',
+    showPrsFrom: 'Afficher les PR de {{account}}',
+    switchFailed: 'Impossible de passer à {{account}}',
     logoutFailed: "Impossible de se déconnecter",
     unavailable: "La connexion à {{provider}} n'est pas encore disponible",
     unavailableBody: "Connectez-vous avec un jeton d'accès personnel pour connecter d'autres plateformes.",
     signOut: 'Se déconnecter',
+    organizations_one: '{{count}} organisation',
+    organizations_other: '{{count}} organisations',
+    activeShowing: 'Active · Affiche les pull requests',
+    connected: 'Connecté',
+    expiredOn: 'Jeton expiré le {{date}}',
+    reconnect: 'Reconnecter',
+    jiraGroup: 'JIRA · TÂCHES LIÉES AUX PULL REQUESTS',
+    connectAnother: 'Connecter une autre organisation',
   },
   login: {
     methods: 'Mode de connexion',
@@ -222,16 +230,29 @@ export const fr: Catalog = {
     connectedToast: '{{name}} connecté à {{account}}',
     connectedToastBody: 'Jeton validé pour {{user}}.',
     guideTabs: 'Guide du jeton',
+    orgCount_one: '1 organisation · {{account}}',
+    orgCount_other: '{{count}} connectées',
+    expiredCount_one: '{{count}} expirée',
+    expiredCount_other: '{{count}} expirées',
+    orgActive: 'Active · Affiche les pull requests',
+    orgConnected: 'Connectée',
+    orgExpired: 'Jeton expiré le {{date}}',
+    reconnect: 'Reconnecter',
+    remove: 'Retirer {{account}}',
+    removed: '{{account}} retirée',
+    removeFailed: 'Impossible de retirer {{account}}',
+    addOrganization: 'Ajouter une organisation',
+    usedHere: 'Utilisées dans ce navigateur :',
     forms: {
       azureDevOps: {
         organization: 'Organisation',
         token: "Jeton d'accès personnel",
-        hint: 'Pour utiliser une autre organisation, créez-y un jeton et connectez-le à la place de celui-ci.',
+        hint: 'Chaque organisation utilise son propre jeton. Seuls les noms des organisations sont enregistrés dans ce navigateur, jamais les jetons.',
       },
       github: {
         owner: 'Organisation ou utilisateur',
         token: 'Fine-grained token',
-        hint: "Avec GitHub actif, les tâches viennent de Jira s'il est connecté.",
+        hint: "Chaque organisation utilise son propre jeton. Avec GitHub actif, les tâches viennent de Jira s'il est connecté.",
       },
       jira: {
         site: 'Site',
@@ -246,7 +267,7 @@ export const fr: Catalog = {
       azureDevOps: {
         title: 'Jeton Azure DevOps',
         description:
-          "Un jeton ne vaut que pour une organisation. Pour changer d'organisation, créez-y un nouveau jeton et connectez-le à la place de l'actuel.",
+          "Un jeton ne vaut que pour une organisation. Pour chaque organisation à afficher dans le board, créez-y un jeton et connectez-le ici : toutes les organisations connectées restent disponibles.",
         steps: [
           "Ouvrez la page Jetons d'accès personnels de l'organisation dans Azure DevOps.",
           'Sélectionnez + Nouveau jeton et, dans Organisation, choisissez celle que vous allez utiliser. Évitez Toutes les organisations accessibles.',
@@ -265,7 +286,7 @@ export const fr: Catalog = {
       github: {
         title: 'Jeton GitHub',
         description:
-          "Utilisez un fine-grained personal access token. Il ne vaut que pour un propriétaire ; pour changer d'organisation, créez-y un autre jeton et connectez-le à la place.",
+          "Utilisez un fine-grained personal access token. Il ne vaut que pour un propriétaire ; pour chaque organisation à afficher dans le board, créez-y un jeton et connectez-le ici.",
         steps: [
           "Ouvrez la page de création d'un fine-grained token (l'interface de GitHub est en anglais).",
           "Dans Resource owner, choisissez l'organisation et définissez l'expiration.",

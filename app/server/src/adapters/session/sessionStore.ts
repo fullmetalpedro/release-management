@@ -7,6 +7,7 @@ export type PatProvider = 'azure-devops' | 'github' | 'jira';
 export type SourceProvider = Exclude<PatProvider, 'jira'>;
 
 export interface PatConnection {
+  provider: PatProvider;
   // Organização (Azure DevOps), dono (GitHub) ou site (Jira).
   account: string;
   // O token fica selado também em memória e só é aberto na hora de chamar o provedor.
@@ -16,17 +17,57 @@ export interface PatConnection {
   // Só Jira: o e-mail entra na autenticação e o cloudId no endereço da API.
   email?: string;
   cloudId?: string;
+  // Nome do dono do token, para o menu de contas trocar o nome junto com a organização ativa.
+  name?: string;
+  // O provedor recusou o token: a conexão continua listada, pedindo para reconectar, e as outras seguem valendo.
+  expiredAt?: number;
 }
+
+// Uma conexão por organização: `azure-devops:contoso`, `github:acme-labs`. Organização e dono não diferenciam
+// maiúsculas nas duas plataformas, então o id usa a forma minúscula.
+export const connectionId = (provider: PatProvider, account: string) => `${provider}:${account.toLowerCase()}`;
+
+// O id pode vir do navegador: só valem as chaves da própria sessão ("__proto__" não é uma conexão).
+export const connectionOf = (session: Session | undefined, id: unknown): PatConnection | undefined =>
+  typeof id === 'string' && session?.connections && Object.hasOwn(session.connections, id) ? session.connections[id] : undefined;
 
 export interface Session {
   id: string;
   mode: 'microsoft' | 'demo' | 'pat';
   user: { name: string; email?: string };
   tokens?: TokenSet;
-  // Modo token: uma conexão por plataforma e qual delas fornece os PRs no momento.
-  connections?: Partial<Record<PatProvider, PatConnection>>;
-  activeSource?: SourceProvider;
+  // Modo token: as conexões por id (ver connectionId) e qual delas fornece os PRs no momento.
+  connections?: Record<string, PatConnection>;
+  activeConnection?: string;
   createdAt: number;
+}
+
+type StoredSession = Session & {
+  // Formatos anteriores: só o token do Azure DevOps, e depois uma conexão por plataforma.
+  pat?: { organization: string; sealedToken: string };
+  activeSource?: SourceProvider;
+};
+
+const isPlatform = (key: string): key is PatProvider => key === 'azure-devops' || key === 'github' || key === 'jira';
+
+// Sessões gravadas por versões anteriores continuam valendo, já no formato de várias organizações.
+function migrate(stored: StoredSession): Session {
+  const { pat, activeSource, ...session } = stored;
+  if (pat && !session.connections) {
+    session.connections = { 'azure-devops': { provider: 'azure-devops', account: pat.organization, sealedToken: pat.sealedToken } };
+  }
+  if (session.connections && Object.keys(session.connections).some(isPlatform)) {
+    const byId: Record<string, PatConnection> = {};
+    for (const [key, connection] of Object.entries(session.connections)) {
+      const provider = isPlatform(key) ? key : connection.provider;
+      byId[connectionId(provider, connection.account)] = { ...connection, provider };
+    }
+    session.connections = byId;
+    const active = pat ? 'azure-devops' : activeSource;
+    const found = active && Object.entries(byId).find(([, connection]) => connection.provider === active);
+    if (found) session.activeConnection = found[0];
+  }
+  return session;
 }
 
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -116,15 +157,7 @@ export class SessionStore {
       const decipher = createDecipheriv('aes-256-gcm', this.key, iv);
       decipher.setAuthTag(tag);
       const json = Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
-      for (const stored of JSON.parse(json) as (Session & { pat?: { organization: string; sealedToken: string } })[]) {
-        // Sessões gravadas antes de existirem várias conexões tinham só o token do Azure DevOps.
-        const { pat, ...session } = stored;
-        if (pat && !session.connections) {
-          session.connections = { 'azure-devops': { account: pat.organization, sealedToken: pat.sealedToken } };
-          session.activeSource = 'azure-devops';
-        }
-        this.sessions.set(session.id, session);
-      }
+      for (const stored of JSON.parse(json) as StoredSession[]) this.sessions.set(stored.id, migrate(stored));
       this.dropExpired();
     } catch {
       // Arquivo ausente ou cifrado com outro segredo: começa sem sessões e os usuários entram de novo.

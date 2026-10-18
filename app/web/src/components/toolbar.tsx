@@ -37,16 +37,20 @@ export function ProjectSwitcher({
   current,
   loading,
   onSelect,
+  organization,
 }: {
   projects: ProjectView[];
   current: ProjectView | undefined;
   loading: boolean;
   onSelect: (id: string) => void;
+  // Com várias organizações conectadas, o nome dela vem antes do projeto.
+  organization?: string;
 }) {
   return (
     <Menu>
       <MenuTrigger className="hover-dark flex items-center gap-2 self-start rounded-lg bg-[#2A2D33] py-[0.4375rem] pl-3 pr-2.5 data-[state=open]:stroke-focus">
         <span className="text-sm font-semibold text-white">
+          {organization && <span className="font-normal text-[#A1A7B0]">{organization} / </span>}
           {current?.name ?? (loading ? t('common.loading') : t('board.noProjects'))}
         </span>
         <ChevronsUpDown size={rem(14)} className="text-[#A1A7B0] group-data-[state=open]:hidden" />

@@ -8,11 +8,11 @@ import type { PatValidator } from '../src/adapters/http/patProviders.ts';
 import { buildServer } from '../src/adapters/http/server.ts';
 import { MemorySourceControl, MemoryWorkTracking } from '../src/adapters/memory/memoryAdapters.ts';
 import { createWorld } from '../src/adapters/memory/world.ts';
-import { SessionStore } from '../src/adapters/session/sessionStore.ts';
+import { connectionOf, SessionStore } from '../src/adapters/session/sessionStore.ts';
 import { loadConfig } from '../src/config.ts';
 import { NotAuthenticatedError } from '../src/core/domain/errors.ts';
 import type { IdentityProvider } from '../src/core/ports/identityProvider.ts';
-import { ConnectionRegistry } from '../src/registry.ts';
+import { ConnectionRegistry, expiringAs } from '../src/registry.ts';
 
 const entra = {
   tenantId: 'tenant-1',
@@ -250,12 +250,23 @@ describe('conexão por token pessoal', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
     const config = { ...loadConfig(env), sessionFile: file };
     const sessions = new SessionStore(config.sessionSecret, file);
-    // Os adapters reais chamariam os provedores; com uma plataforma ativa, os testes usam os de memória.
+    // Os adapters reais chamariam os provedores; com uma organização ativa, os testes usam os de memória. As contas
+    // em `rejected` têm o token recusado pelo provedor, como um PAT vencido.
     const registry = new ConnectionRegistry(config, sessions);
     const real = registry.for.bind(registry);
     const world = createWorld();
-    registry.for = (session) =>
-      session.activeSource ? { sourceControl: new MemorySourceControl(world), workTracking: new MemoryWorkTracking(world) } : real(session);
+    const rejected = new Set<string>();
+    const memory = (account: string) => {
+      const sourceControl = new MemorySourceControl(world);
+      if (!rejected.has(account)) return sourceControl;
+      return new Proxy(sourceControl, { get: () => async () => { throw new NotAuthenticatedError(); } });
+    };
+    registry.for = (session) => {
+      const id = session.activeConnection;
+      const active = connectionOf(session, id);
+      if (!id || !active) return real(session);
+      return { sourceControl: expiringAs(id, active, memory(active.account)), workTracking: new MemoryWorkTracking(world) };
+    };
     const app = await buildServer({ config, sessions, registry, webDist: '/nao-existe', validatePat });
     // O mesmo envelope que o navegador monta: chave AES embrulhada com RSA-OAEP | IV | { nonce, token } em AES-GCM.
     const encrypt = async (plain: string, reuse?: { nonce: string }) => {
@@ -275,7 +286,8 @@ describe('conexão por token pessoal', () => {
     const cookieOf = (response: { headers: Record<string, unknown> }) =>
       [response.headers['set-cookie']].flat().map(String).find((c) => /^rm_session=[^;]{20,}/.test(c))!.split(';')[0]!;
     const me = async (cookie: string) => (await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
-    return { app, sessions, file, encrypt, connect, cookieOf, me };
+    const sessionOf = (cookie: string) => sessions.get(decodeURIComponent(cookie).match(/rm_session=([^.]+)\./)![1])!;
+    return { app, sessions, file, encrypt, connect, cookieOf, me, rejected, sessionOf };
   }
 
   it('está sempre disponível; sem app registration o login com Microsoft é anunciado como indisponível', async () => {
@@ -302,7 +314,12 @@ describe('conexão por token pessoal', () => {
     const response = await connect('azure-devops', { organization: 'acme', encryptedToken });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ provider: 'azure-devops', account: 'acme', user: { name: 'Alex Rivera', email: 'alex.rivera@example.com' } });
+    expect(response.json()).toEqual({
+      id: 'azure-devops:acme',
+      provider: 'azure-devops',
+      account: 'acme',
+      user: { name: 'Alex Rivera', email: 'alex.rivera@example.com' },
+    });
     expect(response.body).not.toContain(token);
     expect(seen).toEqual([['azure-devops', 'acme', token]]);
 
@@ -317,7 +334,7 @@ describe('conexão por token pessoal', () => {
     });
     // Azure DevOps sempre primeiro na lista de contas.
     expect(profile.accounts).toEqual([
-      { provider: 'azure-devops', connected: true, active: true, handle: 'alex.rivera@example.com', account: 'acme' },
+      { id: 'azure-devops:acme', provider: 'azure-devops', connected: true, active: true, handle: 'alex.rivera@example.com', account: 'acme' },
       { provider: 'github', connected: false },
       { provider: 'jira', connected: false },
     ]);
@@ -328,7 +345,7 @@ describe('conexão por token pessoal', () => {
     const [, sessionId] = decodeURIComponent(cookie).match(/rm_session=([^.]+)\./)!;
     const stored = sessions.get(sessionId)!;
     expect(JSON.stringify(stored)).not.toContain(token);
-    expect(sessions.open(stored.connections!['azure-devops']!.sealedToken)).toBe(token);
+    expect(sessions.open(stored.connections!['azure-devops:acme']!.sealedToken)).toBe(token);
   });
 
   it('token recusado não cria sessão', async () => {
@@ -369,17 +386,22 @@ describe('conexão por token pessoal', () => {
 
     let profile = await me(cookie);
     expect(profile.accounts.map((a: { provider: string; connected: boolean; active?: boolean; account?: string }) => [a.provider, a.connected, a.active, a.account])).toEqual([
-      ['azure-devops', true, true, 'acme'],
-      ['github', true, false, 'acme-gh'],
+      ['azure-devops', true, false, 'acme'],
+      ['github', true, true, 'acme-gh'],
       ['jira', true, false, 'acme.atlassian.net'],
     ]);
-    expect(profile.source.provider).toBe('azure-devops');
+    // A organização recém-conectada passa a mostrar os PRs.
+    expect(profile.source.provider).toBe('github');
 
     const post = (body: object, headers: Record<string, string> = { 'x-requested-with': 'fetch' }) =>
       app.inject({ method: 'POST', url: '/auth/active', headers: { cookie, ...headers }, payload: body });
-    expect((await post({ provider: 'github' }, {})).statusCode).toBe(400);
-    expect((await post({ provider: 'jira' })).statusCode).toBe(400);
-    expect((await post({ provider: 'github' })).statusCode).toBe(204);
+    expect((await post({ connectionId: 'github:acme-gh' }, {})).statusCode).toBe(400);
+    expect((await post({ connectionId: 'jira:acme.atlassian.net' })).statusCode).toBe(400);
+    expect((await post({ connectionId: '__proto__' })).statusCode).toBe(400);
+    expect((await post({ provider: 'github' })).statusCode).toBe(400);
+    expect((await post({ connectionId: 'azure-devops:acme' })).statusCode).toBe(204);
+    expect((await me(cookie)).source.provider).toBe('azure-devops');
+    expect((await post({ connectionId: 'github:acme-gh' })).statusCode).toBe(204);
 
     profile = await me(cookie);
     expect(profile).toMatchObject({
@@ -390,15 +412,113 @@ describe('conexão por token pessoal', () => {
     });
   });
 
-  it('trocar o token de uma plataforma mantém a sessão e as outras conexões', async () => {
-    const { connect, encrypt, cookieOf, me } = await patServer();
-    const cookie = cookieOf(await connect('azure-devops', { organization: 'acme', encryptedToken: await encrypt(token) }));
-    await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }, { cookie });
-    await connect('azure-devops', { organization: 'outra-org', encryptedToken: await encrypt(token) }, { cookie });
+  it('várias organizações por plataforma ficam conectadas ao mesmo tempo', async () => {
+    const { app, connect, encrypt, cookieOf, me } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('azure-devops', { organization: 'fabrikam', encryptedToken: await encrypt(token) }, { cookie });
+    await connect('github', { organization: 'acme-labs', encryptedToken: await encrypt(token) }, { cookie });
+    await connect('github', { organization: 'globex', encryptedToken: await encrypt(token) }, { cookie });
+
+    let profile = await me(cookie);
+    // A última organização conectada passa a mostrar os PRs.
+    expect(profile.organization).toBe('globex');
+    expect(profile.accounts.map((a: { id?: string; active?: boolean }) => [a.id, a.active])).toEqual([
+      ['azure-devops:contoso', false],
+      ['azure-devops:fabrikam', false],
+      ['github:acme-labs', false],
+      ['github:globex', true],
+      [undefined, undefined],
+    ]);
+
+    const activate = (connectionId: string) =>
+      app.inject({ method: 'POST', url: '/auth/active', headers: { cookie, 'x-requested-with': 'fetch' }, payload: { connectionId } });
+    expect((await activate('azure-devops:fabrikam')).statusCode).toBe(204);
+    profile = await me(cookie);
+    expect(profile).toMatchObject({ organization: 'fabrikam', source: { provider: 'azure-devops' } });
+  });
+
+  it('reconectar uma organização troca só o token dela, sem mudar a ativa', async () => {
+    const { connect, encrypt, cookieOf, me, sessionOf, sessions } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('azure-devops', { organization: 'fabrikam', encryptedToken: await encrypt(token) }, { cookie });
+    const other = 'pat-' + 'b'.repeat(60);
+    // Organização não diferencia maiúsculas: é a mesma conexão.
+    await connect('azure-devops', { organization: 'Contoso', encryptedToken: await encrypt(other) }, { cookie });
 
     const profile = await me(cookie);
-    expect(profile.organization).toBe('outra-org');
+    expect(profile.organization).toBe('fabrikam');
     expect(profile.accounts.filter((a: { connected: boolean }) => a.connected)).toHaveLength(2);
+    expect(sessions.open(sessionOf(cookie).connections!['azure-devops:contoso']!.sealedToken)).toBe(other);
+  });
+
+  it('o Jira continua sendo um site por sessão', async () => {
+    const { connect, encrypt, cookieOf, me } = await patServer(async () => ({ owner: alex, cloudId: 'c1' }));
+    const cookie = cookieOf(await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }));
+    await connect('jira', { site: 'acme.atlassian.net', email: 'alex@example.com', encryptedToken: await encrypt(token) }, { cookie });
+    await connect('jira', { site: 'outra.atlassian.net', email: 'alex@example.com', encryptedToken: await encrypt(token) }, { cookie });
+    const jira = (await me(cookie)).accounts.filter((a: { provider: string }) => a.provider === 'jira');
+    expect(jira).toEqual([expect.objectContaining({ id: 'jira:outra.atlassian.net', active: false })]);
+  });
+
+  it('um token recusado derruba só a organização dele', async () => {
+    const { app, connect, encrypt, cookieOf, me, rejected } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('azure-devops', { organization: 'northwind', encryptedToken: await encrypt(token) }, { cookie });
+    rejected.add('northwind');
+
+    const board = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
+    expect(board.statusCode).toBe(401);
+    expect(board.json()).toMatchObject({ code: 'connection-expired', connectionId: 'azure-devops:northwind' });
+    expect(board.json().message).toContain('northwind');
+    expect(board.headers['set-cookie']).toBeUndefined();
+
+    // A sessão continua: o menu de contas abre e mostra qual organização pede reconexão.
+    let profile = await me(cookie);
+    const northwind = profile.accounts.find((a: { id?: string }) => a.id === 'azure-devops:northwind');
+    expect(northwind).toMatchObject({ active: true, expiredAt: expect.any(String) });
+
+    // Não dá para voltar a uma organização expirada sem reconectar; as outras seguem valendo.
+    const activate = (connectionId: string) =>
+      app.inject({ method: 'POST', url: '/auth/active', headers: { cookie, 'x-requested-with': 'fetch' }, payload: { connectionId } });
+    expect((await activate('azure-devops:contoso')).statusCode).toBe(204);
+    expect((await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } })).statusCode).toBe(200);
+    expect((await activate('azure-devops:northwind')).statusCode).toBe(400);
+
+    // Reconectar limpa a expiração, sem trocar a organização ativa.
+    rejected.delete('northwind');
+    await connect('azure-devops', { organization: 'northwind', encryptedToken: await encrypt(token) }, { cookie });
+    profile = await me(cookie);
+    expect(profile.organization).toBe('contoso');
+    expect(profile.accounts.find((a: { id?: string }) => a.id === 'azure-devops:northwind').expiredAt).toBeUndefined();
+  });
+
+  it('a sessão só acaba quando nenhuma organização sobra válida', async () => {
+    const { app, connect, encrypt, cookieOf, rejected } = await patServer();
+    const cookie = cookieOf(await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }));
+    rejected.add('acme-gh');
+    const response = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
+    expect(response.statusCode).toBe(401);
+    expect(response.json().code).toBe('unauthenticated');
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(401);
+  });
+
+  it('remove uma organização; se era a ativa, outra assume', async () => {
+    const { app, connect, encrypt, cookieOf, me } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }, { cookie });
+    const remove = (id: string, headers: Record<string, string> = { 'x-requested-with': 'fetch' }) =>
+      app.inject({ method: 'DELETE', url: `/auth/connections/${encodeURIComponent(id)}`, headers: { cookie, ...headers } });
+
+    expect((await remove('github:acme-gh', {})).statusCode).toBe(400);
+    expect((await remove('__proto__')).statusCode).toBe(404);
+    expect((await remove('github:acme-gh')).statusCode).toBe(204);
+    expect(await me(cookie)).toMatchObject({ organization: 'contoso', source: { provider: 'azure-devops' } });
+
+    // Sem nenhuma conexão, a sessão acaba.
+    const last = await remove('azure-devops:contoso');
+    expect(last.statusCode).toBe(204);
+    expect(String(last.headers['set-cookie'])).toMatch(/rm_session=;/);
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(401);
   });
 
   it('só o Jira conectado não basta para abrir o board', async () => {
@@ -417,8 +537,33 @@ describe('conexão por token pessoal', () => {
     const session = store.create({ mode: 'pat', user: { name: 'Alex' }, ...({ pat: { organization: 'acme', sealedToken: store.seal(token) } } as object) });
 
     const reloaded = new SessionStore(secret, file).get(session.id)!;
-    expect(reloaded.activeSource).toBe('azure-devops');
-    expect(reloaded.connections!['azure-devops']!.account).toBe('acme');
-    expect(store.open(reloaded.connections!['azure-devops']!.sealedToken)).toBe(token);
+    expect(reloaded.activeConnection).toBe('azure-devops:acme');
+    expect(reloaded.connections!['azure-devops:acme']).toMatchObject({ provider: 'azure-devops', account: 'acme' });
+    expect(store.open(reloaded.connections!['azure-devops:acme']!.sealedToken)).toBe(token);
+  });
+
+  it('sessão gravada com uma conexão por plataforma vira o mapa por organização', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
+    const secret = 'x'.repeat(32);
+    const store = new SessionStore(secret, file);
+    const sealedToken = store.seal(token);
+    const session = store.create({
+      mode: 'pat',
+      user: { name: 'Alex' },
+      ...({
+        connections: {
+          'azure-devops': { account: 'Contoso', sealedToken },
+          github: { account: 'acme-labs', sealedToken, handle: 'alex' },
+          jira: { account: 'acme.atlassian.net', sealedToken, email: 'alex@example.com', cloudId: 'c1' },
+        },
+        activeSource: 'github',
+      } as object),
+    });
+
+    const reloaded = new SessionStore(secret, file).get(session.id)!;
+    expect(Object.keys(reloaded.connections!)).toEqual(['azure-devops:contoso', 'github:acme-labs', 'jira:acme.atlassian.net']);
+    expect(reloaded.connections!['github:acme-labs']).toMatchObject({ provider: 'github', account: 'acme-labs', handle: 'alex' });
+    expect(reloaded.activeConnection).toBe('github:acme-labs');
+    expect('activeSource' in reloaded).toBe(false);
   });
 });

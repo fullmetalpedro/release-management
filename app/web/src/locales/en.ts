@@ -188,12 +188,20 @@ export const en: Catalog = {
     accounts: 'ACCOUNTS',
     noAccount: 'No account connected',
     connect: 'Connect',
-    showPrsFrom: 'Show pull requests from {{provider}}',
-    switchFailed: "Couldn't switch to {{provider}}",
+    showPrsFrom: 'Show pull requests from {{account}}',
+    switchFailed: "Couldn't switch to {{account}}",
     logoutFailed: "Couldn't sign out",
     unavailable: "{{provider}} connection isn't available yet",
     unavailableBody: 'Sign in with a personal access token to connect other platforms.',
     signOut: 'Sign out',
+    organizations_one: '{{count}} organization',
+    organizations_other: '{{count}} organizations',
+    activeShowing: 'Active · Showing pull requests',
+    connected: 'Connected',
+    expiredOn: 'Token expired on {{date}}',
+    reconnect: 'Reconnect',
+    jiraGroup: 'JIRA · TASKS LINKED TO PULL REQUESTS',
+    connectAnother: 'Connect another organization',
   },
   login: {
     methods: 'Sign-in method',
@@ -221,16 +229,29 @@ export const en: Catalog = {
     connectedToast: '{{name}} connected to {{account}}',
     connectedToastBody: 'Token validated for {{user}}.',
     guideTabs: 'Token guide',
+    orgCount_one: '1 organization · {{account}}',
+    orgCount_other: '{{count}} connected',
+    expiredCount_one: '{{count}} expired',
+    expiredCount_other: '{{count}} expired',
+    orgActive: 'Active · Showing pull requests',
+    orgConnected: 'Connected',
+    orgExpired: 'Token expired on {{date}}',
+    reconnect: 'Reconnect',
+    remove: 'Remove {{account}}',
+    removed: '{{account}} removed',
+    removeFailed: "Couldn't remove {{account}}",
+    addOrganization: 'Add organization',
+    usedHere: 'Used in this browser:',
     forms: {
       azureDevOps: {
         organization: 'Organization',
         token: 'Personal access token',
-        hint: 'To use another organization, create a token there and connect it in place of this one.',
+        hint: 'Each organization uses its own token. Only organization names are saved in this browser; tokens never are.',
       },
       github: {
         owner: 'Organization or user',
         token: 'Fine-grained token',
-        hint: "With GitHub active, tasks come from Jira when it's connected.",
+        hint: "Each organization uses its own token. With GitHub active, tasks come from Jira when it's connected.",
       },
       jira: {
         site: 'Site',
@@ -245,7 +266,7 @@ export const en: Catalog = {
       azureDevOps: {
         title: 'Azure DevOps token',
         description:
-          'A token works for a single organization. To switch organizations, create a new token there and connect it in place of the current one.',
+          'A token works for a single organization. For each organization you want on the board, create a token there and connect it here: every connected organization stays available.',
         steps: [
           "Open your organization's Personal access tokens page in Azure DevOps.",
           "Select + New Token and, under Organization, pick the one you'll use. Don't choose All accessible organizations.",
@@ -264,7 +285,7 @@ export const en: Catalog = {
       github: {
         title: 'GitHub token',
         description:
-          'Use a fine-grained personal access token. It works for a single resource owner; to switch organizations, create another token there and connect it instead.',
+          'Use a fine-grained personal access token. It works for a single resource owner; for each organization you want on the board, create a token there and connect it here.',
         steps: [
           'Open the page to generate a fine-grained token.',
           'Under Resource owner, pick the organization and set the expiration.',

@@ -72,8 +72,9 @@ export function useNow(intervalMs = 30_000): number {
 
 // `isValid` confere o formato do que estava guardado: uma versão antiga da aplicação (ou outra aba) pode ter
 // gravado algo que esta não entende, e aí vale o valor inicial.
+// A chave pode mudar (uma preferência por organização, por exemplo): o valor é relido da chave nova.
 export function useStoredState<T>(key: string, initial: T, isValid?: (value: unknown) => value is T): [T, (value: T) => void] {
-  const [value, setValue] = useState<T>(() => {
+  const read = (): T => {
     try {
       const raw = localStorage.getItem(key);
       if (raw === null) return initial;
@@ -82,9 +83,12 @@ export function useStoredState<T>(key: string, initial: T, isValid?: (value: unk
     } catch {
       return initial;
     }
-  });
+  };
+  const [state, setState] = useState(() => ({ key, value: read() }));
+  const value = state.key === key ? state.value : read();
+  if (state.key !== key) setState({ key, value });
   const update = (next: T) => {
-    setValue(next);
+    setState({ key, value: next });
     try {
       localStorage.setItem(key, JSON.stringify(next));
     } catch {

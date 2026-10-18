@@ -10,13 +10,18 @@ import {
   KeyRound,
   LoaderCircle,
   Repeat2,
+  X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AppMark, AzureDevOpsLogo, GitHubLogo, JiraLogo } from '../components/logos';
 import { useToast } from '../components/toast';
+import { OrgMark } from '../components/OrgMark';
+import type { ConnectIntent } from '../components/TopBar';
 import { cx } from '../components/ui';
-import type { Me, ProviderId } from '../lib/api';
+import { api, type Account, type Me, type ProviderId } from '../lib/api';
+import { shortDate } from '../lib/format';
+import { rememberedOrgs, rememberOrg } from '../lib/orgs';
 import { connectPlatform, type PlatformAccount } from '../lib/pat';
 import { useMe } from '../lib/session';
 import { t } from '../lib/i18n';
@@ -340,6 +345,8 @@ function ConnectForm({
   onChange,
   onFocus,
   onConnected,
+  shortcuts = [],
+  focusToken = 0,
 }: {
   provider: ProviderId;
   name: string;
@@ -348,7 +355,11 @@ function ConnectForm({
   values: Record<FieldName, string>;
   onChange: (field: FieldName, value: string) => void;
   onFocus: () => void;
-  onConnected: () => void;
+  onConnected: (account: string) => void;
+  // Organizações já usadas neste navegador e ainda não conectadas: um clique preenche o campo.
+  shortcuts?: string[];
+  // Muda quando o usuário pede para reconectar uma organização: o campo do token recebe o foco.
+  focusToken?: number;
 }) {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -357,6 +368,12 @@ function ConnectForm({
   const [reveal, setReveal] = useState(false);
   // Token aceito: o campo fica verde, com o token ainda lá (mascarado), até o usuário digitar outro.
   const [validated, setValidated] = useState(false);
+  // Azure DevOps e GitHub somam organizações: depois de conectar uma, o formulário volta vazio para a próxima.
+  const adds = provider !== 'jira';
+  const tokenInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusToken) tokenInput.current?.focus();
+  }, [focusToken]);
   const validatedRef = useRef(validated);
   validatedRef.current = validated;
   // Fechou sem conectar: o token digitado e não aceito não fica guardado no formulário escondido.
@@ -370,12 +387,17 @@ function ConnectForm({
     mutationFn: () => connectPlatform(provider, spec.account(values), token.trim()),
     onSuccess: async (result) => {
       setReveal(false);
-      setValidated(true);
+      if (adds) {
+        setToken('');
+        rememberOrg(provider, result.account);
+      } else {
+        setValidated(true);
+      }
       // Dados da conta anterior não valem para a nova conexão. A sessão é só recarregada, sem ser
       // zerada: zerar desmontaria a tela de entrada inteira por um instante.
       queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'auth-mode' && query.queryKey[0] !== 'me' });
       await queryClient.refetchQueries({ queryKey: ['me'] });
-      onConnected();
+      onConnected(result.account);
       toast.show({
         kind: 'success',
         title: t('pat.connectedToast', { name, account: result.account }),
@@ -451,6 +473,31 @@ function ConnectForm({
             </div>
           ))}
         </div>
+        {adds && shortcuts.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[0.78125rem] text-mute">{t('pat.usedHere')}</span>
+            {shortcuts.map((shortcut) => {
+              const field = spec.fields[0]!.name;
+              const picked = values[field].trim().toLowerCase() === shortcut.toLowerCase();
+              return (
+                <button
+                  key={shortcut}
+                  type="button"
+                  onClick={() => {
+                    onChange(field, shortcut);
+                    tokenInput.current?.focus();
+                  }}
+                  className={cx(
+                    'rounded-md px-2 py-0.5 font-mono text-[0.75rem] font-medium',
+                    picked ? 'bg-[#E0E7FF] text-[#3730A3]' : 'bg-[#F1F5F9] text-ink-2 hover:bg-[#E2E8F0]',
+                  )}
+                >
+                  {shortcut}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="flex flex-col gap-1.5">
           <label htmlFor={`pat-token-${provider}`} className="text-[0.78125rem] font-medium text-ink-2">
             {spec.tokenLabel}
@@ -467,6 +514,7 @@ function ConnectForm({
           >
             <KeyRound size={rem(15)} className={cx('shrink-0', validated ? 'text-[#16A34A]' : 'text-mute')} />
             <input
+              ref={tokenInput}
               id={`pat-token-${provider}`}
               type={reveal ? 'text' : 'password'}
               value={token}
@@ -515,44 +563,125 @@ function ConnectForm({
   );
 }
 
+// Organizações conectadas de uma plataforma, com a ativa, as que pedem reconexão e a opção de remover.
+function OrgList({
+  accounts,
+  onReconnect,
+}: {
+  accounts: Account[];
+  onReconnect: (account: string) => void;
+}) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const remove = useMutation({
+    mutationFn: (account: Account) => api.removeConnection(account.id!),
+    onSuccess: async (_result, account) => {
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'auth-mode' && query.queryKey[0] !== 'me' });
+      await queryClient.refetchQueries({ queryKey: ['me'] });
+      toast.show({ kind: 'success', title: t('pat.removed', { account: account.account }) });
+    },
+    onError: (error, account) =>
+      toast.show({ kind: 'error', title: t('pat.removeFailed', { account: account.account }), description: error.message }),
+  });
+  return (
+    <ul className="stroke mb-4 flex flex-col rounded-[0.625rem]">
+      {accounts.map((account, index) => {
+        const name = account.account ?? '';
+        const expired = !!account.expiredAt;
+        return (
+          <li
+            key={account.id}
+            className={cx('group flex items-center gap-3 px-3 py-2.5', index < accounts.length - 1 && 'border-b border-line-soft')}
+          >
+            <OrgMark name={name} size={30} muted={expired} />
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="truncate text-[0.875rem] font-semibold text-ink">{name}</span>
+              <span className={cx('truncate text-[0.78125rem]', expired ? 'text-[#B91C1C]' : 'text-mute')}>
+                {expired
+                  ? t('pat.orgExpired', { date: shortDate(account.expiredAt) })
+                  : account.active
+                    ? t('pat.orgActive')
+                    : t('pat.orgConnected')}
+              </span>
+            </div>
+            {expired && (
+              <button
+                type="button"
+                onClick={() => onReconnect(name)}
+                className="hover-primary flex h-7 shrink-0 items-center rounded-md bg-ink px-2.5 text-xs font-semibold text-white"
+              >
+                {t('pat.reconnect')}
+              </button>
+            )}
+            {account.active && !expired && <Check size={rem(16)} className="shrink-0 text-[#16A34A]" />}
+            <button
+              type="button"
+              aria-label={t('pat.remove', { account: name })}
+              title={t('pat.remove', { account: name })}
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(account)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-faint opacity-0 hover:bg-[#F1F5F9] hover:text-ink-2 focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <X size={rem(14)} />
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 const NO_ACCOUNTS: Me['accounts'] = [];
 
 export function PatConnectPage({ defaultOrganization }: { defaultOrganization: string }) {
   const me = useMe();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Vindo do menu de contas: "Conectar outra organização" abre a plataforma; "Reconectar" já preenche a organização.
+  const intent = (location.state as { connect?: ConnectIntent } | null)?.connect;
   const accounts = me.data?.mode === 'pat' ? me.data.accounts : NO_ACCOUNTS;
-  const accountOf = (provider: ProviderId) => accounts.find((account) => account.provider === provider && account.connected);
-  const connectedCount = accounts.filter((account) => account.connected).length;
-  // Os PRs vêm do Azure DevOps ou do GitHub; só o Jira não abre o board.
-  const hasSource = !!accountOf('azure-devops') || !!accountOf('github');
+  const accountsOf = (provider: ProviderId) => accounts.filter((account) => account.provider === provider && account.connected);
+  const connectedCount = PLATFORMS.filter((platform) => accountsOf(platform.id).length > 0).length;
+  // Os PRs vêm do Azure DevOps ou do GitHub; só o Jira, ou só tokens expirados, não abrem o board.
+  const hasSource = accounts.some((account) => account.connected && account.provider !== 'jira' && !account.expiredAt);
 
-  const [guideTab, setGuideTab] = useState<ProviderId>('azure-devops');
+  const [guideTab, setGuideTab] = useState<ProviderId>(intent?.provider ?? 'azure-devops');
   // Uma plataforma aberta por vez; sem nenhuma conectada, o Azure DevOps já começa aberto.
-  const [open, setOpen] = useState<ProviderId | null | undefined>(undefined);
+  const [open, setOpen] = useState<ProviderId | null | undefined>(intent?.provider);
   const openRow = open === undefined ? (me.isFetched && connectedCount === 0 ? 'azure-devops' : null) : open;
   const [values, setValues] = useState<Record<FieldName, string>>({
-    organization: defaultOrganization,
-    owner: '',
+    organization: intent?.provider === 'azure-devops' ? (intent.account ?? '') : intent ? '' : defaultOrganization,
+    owner: intent?.provider === 'github' ? (intent.account ?? '') : '',
     site: '',
     email: '',
   });
+  const [focusToken, setFocusToken] = useState(intent?.account ? 1 : 0);
 
-  // Com uma conexão ativa os campos começam na conta dela, para o "Trocar" partir do valor atual.
-  const azure = accountOf('azure-devops')?.account;
-  const github = accountOf('github')?.account;
-  const jira = accountOf('jira')?.account;
+  // O Jira continua sendo um site só: o campo começa no site conectado, para o "Trocar" partir dele.
+  const jira = accountsOf('jira')[0]?.account;
   useEffect(() => {
-    setValues((current) => ({
-      ...current,
-      organization: azure ?? current.organization,
-      owner: github ?? current.owner,
-      site: jira ?? current.site,
-    }));
-  }, [azure, github, jira]);
+    if (jira) setValues((current) => ({ ...current, site: jira }));
+  }, [jira]);
 
   const show = (provider: ProviderId | null) => {
     if (provider) setGuideTab(provider);
     setOpen(provider);
+  };
+
+  const field = (provider: ProviderId): FieldName => (provider === 'github' ? 'owner' : 'organization');
+  const reconnect = (provider: ProviderId, account: string) => {
+    setValues((current) => ({ ...current, [field(provider)]: account }));
+    setGuideTab(provider);
+    setFocusToken((count) => count + 1);
+  };
+
+  // "2 conectadas · 1 expirada", "1 organização · acme-labs", ou o site do Jira.
+  const summary = (provider: ProviderId, connected: Account[]) => {
+    if (connected.length === 0) return t('pat.noToken');
+    if (provider === 'jira') return FORMS.jira.address(connected[0]!.account ?? '');
+    const expired = connected.filter((account) => account.expiredAt).length;
+    const count = t('pat.orgCount', { count: connected.length, account: connected[0]!.account });
+    return expired > 0 ? `${count} · ${t('pat.expiredCount', { count: expired })}` : count;
   };
 
   return (
@@ -576,19 +705,41 @@ export function PatConnectPage({ defaultOrganization }: { defaultOrganization: s
             </div>
 
             {PLATFORMS.map((platform) => {
-              const account = accountOf(platform.id);
+              const connected = accountsOf(platform.id);
               const expanded = openRow === platform.id;
+              const adds = platform.id !== 'jira';
+              const shortcuts = adds
+                ? rememberedOrgs(platform.id).filter(
+                    (name) => !connected.some((account) => account.account?.toLowerCase() === name.toLowerCase() && !account.expiredAt),
+                  )
+                : [];
               return (
                 <PlatformRow
                   key={platform.id}
                   logo={platform.logo(18)}
                   name={platform.name}
-                  sub={account ? FORMS[platform.id].address(account.account ?? '') : t('pat.noToken')}
-                  connected={!!account && !expanded}
+                  sub={summary(platform.id, connected)}
+                  connected={connected.length > 0 && !expanded}
                   expanded={expanded}
-                  hint={expanded ? (connectedCount > 0 ? t('pat.close') : undefined) : account ? t('pat.change') : undefined}
+                  hint={
+                    expanded
+                      ? connectedCount > 0
+                        ? t('pat.close')
+                        : undefined
+                      : connected.length > 0
+                        ? adds
+                          ? t('pat.addOrganization')
+                          : t('pat.change')
+                        : undefined
+                  }
                   onToggle={expanded ? (connectedCount > 0 ? () => show(null) : undefined) : () => show(platform.id)}
                 >
+                  {adds && connected.length > 0 && (
+                    <>
+                      <OrgList accounts={connected} onReconnect={(account) => reconnect(platform.id, account)} />
+                      <h3 className="mb-3 text-[0.875rem] font-semibold text-ink">{t('pat.addOrganization')}</h3>
+                    </>
+                  )}
                   <ConnectForm
                     provider={platform.id}
                     name={platform.name}
@@ -596,8 +747,13 @@ export function PatConnectPage({ defaultOrganization }: { defaultOrganization: s
                     values={values}
                     onChange={(field, value) => setValues((current) => ({ ...current, [field]: value }))}
                     onFocus={() => setGuideTab(platform.id)}
-                    // Fica aberta, com o campo verde; fechar é com o usuário.
-                    onConnected={() => setOpen(platform.id)}
+                    // Fica aberta: a organização nova aparece na lista e o formulário volta vazio para a próxima.
+                    onConnected={() => {
+                      setOpen(platform.id);
+                      if (adds) setValues((current) => ({ ...current, [field(platform.id)]: '' }));
+                    }}
+                    shortcuts={shortcuts}
+                    focusToken={expanded ? focusToken : 0}
                   />
                 </PlatformRow>
               );

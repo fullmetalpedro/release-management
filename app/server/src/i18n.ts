@@ -183,6 +183,16 @@ const CATALOG = {
     en: "This platform isn't connected.",
     fr: "Cette plateforme n'est pas connectée.",
   },
+  connectionNotFound: {
+    pt: 'Essa organização não está conectada.',
+    en: "This organization isn't connected.",
+    fr: "Cette organisation n'est pas connectée.",
+  },
+  connectionExpired: {
+    pt: 'O token de {account} expirou. Reconecte essa organização para continuar.',
+    en: 'The token for {account} has expired. Reconnect this organization to continue.',
+    fr: 'Le jeton de {account} a expiré. Reconnectez cette organisation pour continuer.',
+  },
   noPhoto: {
     pt: 'Sem foto',
     en: 'No photo',

@@ -26,17 +26,23 @@ const me = z.object({
   // De onde vêm os PRs e de onde vêm as tasks; sem tracker (GitHub sem Jira) não há tasks a vincular.
   source: platform.nullable(),
   tracker: platform.nullable(),
+  // Uma linha por organização conectada (modo token), agrupadas por plataforma; plataforma sem nenhuma aparece uma
+  // vez, desconectada.
   accounts: z.array(
     z.object({
+      id: optional(z.string()),
       provider: providerId,
       connected: z.boolean(),
       active: optional(z.boolean()),
       handle: optional(z.string()),
       account: optional(z.string()),
+      // O provedor recusou o token: a organização pede para reconectar.
+      expiredAt: optional(z.string()),
     }),
   ),
 });
 export type Me = z.infer<typeof me>;
+export type Account = Me['accounts'][number];
 
 const projectView = z.object({ id: z.string(), name: z.string(), openPullRequests: z.number() });
 export type ProjectView = z.infer<typeof projectView>;
@@ -200,7 +206,8 @@ const repo = (projectId: string, repositoryId: string) =>
 export const api = {
   me: () => get('/api/me', me),
   logout: () => request('POST', '/auth/logout'),
-  setActiveSource: (provider: ProviderId) => request('POST', '/auth/active', { provider }),
+  setActiveConnection: (connectionId: string) => request('POST', '/auth/active', { connectionId }),
+  removeConnection: (connectionId: string) => request('DELETE', `/auth/connections/${encodeURIComponent(connectionId)}`),
   projects: () => get('/api/projects', z.array(projectView)),
   board: (projectId: string) => get(`/api/projects/${encodeURIComponent(projectId)}/board`, board),
   lanes: (projectId: string) =>

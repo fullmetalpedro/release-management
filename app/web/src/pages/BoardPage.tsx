@@ -314,7 +314,13 @@ export function BoardPage() {
 
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 px-8 pb-5 pt-7">
         <div className="flex flex-col gap-2.5">
-          <ProjectSwitcher projects={projects} current={project} loading={projectsLoading} onSelect={selectProject} />
+          <ProjectSwitcher
+            projects={projects}
+            current={project}
+            loading={projectsLoading}
+            onSelect={selectProject}
+            organization={me.accounts.filter((account) => account.connected && account.provider !== 'jira').length > 1 ? me.organization : undefined}
+          />
           <h1 className="text-2xl font-bold tracking-[-0.3px] text-ink">{t('board.title')}</h1>
           <div className="flex h-4 items-center gap-2 text-[0.8125rem]">
             {loading || !board.data ? null : (
