@@ -51,6 +51,7 @@ export const pt = {
     release: { name: 'Release', description: 'PRs que entraram na última branch de release' },
   },
   card: {
+    project: 'Projeto',
     reviewer: 'Você é revisor',
     waitingAuthor: 'Aguardando o autor',
     into: 'para',
@@ -80,6 +81,14 @@ export const pt = {
     },
   },
   board: {
+    allProjects: 'Todos os projetos',
+    chooseProject: 'Escolher projeto',
+    perRepositoryTitle: 'Mergeados e Release são por repositório',
+    perRepositoryBody: 'Essas colunas dependem de um repositório e da branch de release dele. Escolha um projeto para vê-las.',
+    projectFailed: '{{project}} não carregou ({{reason}})',
+    tryAgain: 'Tentar de novo',
+    tooManyProjects_one: 'Mostrando {{limit}} projetos. {{count}} projeto com PRs abertos ficou de fora: escolha um projeto para vê-lo.',
+    tooManyProjects_other: 'Mostrando {{limit}} projetos. {{count}} projetos com PRs abertos ficaram de fora: escolha um projeto para vê-los.',
     title: 'Code review',
     openPrs_one: '{{count}} PR aberto',
     openPrs_other: '{{count}} PRs abertos',

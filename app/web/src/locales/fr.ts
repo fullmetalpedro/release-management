@@ -54,6 +54,7 @@ export const fr: Catalog = {
     release: { name: 'Release', description: 'PR inclus dans la dernière branche de release' },
   },
   card: {
+    project: 'Projet',
     reviewer: 'Vous êtes réviseur',
     waitingAuthor: "En attente de l'auteur",
     into: 'vers',
@@ -83,6 +84,14 @@ export const fr: Catalog = {
     },
   },
   board: {
+    allProjects: 'Tous les projets',
+    chooseProject: 'Choisir un projet',
+    perRepositoryTitle: 'Fusionnés et Release sont par dépôt',
+    perRepositoryBody: "Ces colonnes dépendent d'un dépôt et de sa branche de release. Choisissez un projet pour les voir.",
+    projectFailed: "{{project}} n'a pas pu être chargé ({{reason}})",
+    tryAgain: 'Réessayer',
+    tooManyProjects_one: 'Affichage de {{limit}} projets. {{count}} projet avec des PR ouverts a été laissé de côté : choisissez un projet pour le voir.',
+    tooManyProjects_other: 'Affichage de {{limit}} projets. {{count}} projets avec des PR ouverts ont été laissés de côté : choisissez un projet pour les voir.',
     title: 'Revue de code',
     openPrs_one: '{{count}} PR ouvert',
     openPrs_other: '{{count}} PR ouverts',

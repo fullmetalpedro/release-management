@@ -53,6 +53,7 @@ export const en: Catalog = {
     release: { name: 'Release', description: 'PRs in the latest release branch' },
   },
   card: {
+    project: 'Project',
     reviewer: "You're a reviewer",
     waitingAuthor: 'Waiting for author',
     into: 'into',
@@ -82,6 +83,14 @@ export const en: Catalog = {
     },
   },
   board: {
+    allProjects: 'All projects',
+    chooseProject: 'Choose project',
+    perRepositoryTitle: 'Merged and Release are per repository',
+    perRepositoryBody: 'These columns depend on a repository and its release branch. Choose a project to see them.',
+    projectFailed: "{{project}} didn't load ({{reason}})",
+    tryAgain: 'Try again',
+    tooManyProjects_one: 'Showing {{limit}} projects. {{count}} project with open PRs was left out: choose a project to see it.',
+    tooManyProjects_other: 'Showing {{limit}} projects. {{count}} projects with open PRs were left out: choose a project to see them.',
     title: 'Code review',
     openPrs_one: '{{count}} open PR',
     openPrs_other: '{{count}} open PRs',

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { DropdownMenu } from 'radix-ui';
 import type { ProjectView } from '../lib/api';
+import { ALL_PROJECTS } from '../lib/session';
 import { COLUMNS, type ColumnId } from './board';
 import {
   Avatar,
@@ -38,6 +39,9 @@ export function ProjectSwitcher({
   loading,
   onSelect,
   organization,
+  allProjects = false,
+  open,
+  onOpenChange,
 }: {
   projects: ProjectView[];
   current: ProjectView | undefined;
@@ -45,21 +49,34 @@ export function ProjectSwitcher({
   onSelect: (id: string) => void;
   // Com várias organizações conectadas, o nome dela vem antes do projeto.
   organization?: string;
+  // "Todos os projetos" está escolhido.
+  allProjects?: boolean;
+  // Aberto de fora, pelo botão "Escolher projeto" do board.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
+  const options = [
+    // Com um projeto só, "todos" seria o mesmo board.
+    ...(projects.length > 1
+      ? [{ id: ALL_PROJECTS, name: t('board.allProjects'), openPullRequests: projects.reduce((sum, p) => sum + p.openPullRequests, 0) }]
+      : []),
+    ...projects,
+  ];
+  const selectedId = allProjects ? ALL_PROJECTS : current?.id;
   return (
-    <Menu>
+    <Menu open={open} onOpenChange={onOpenChange}>
       <MenuTrigger className="hover-dark flex items-center gap-2 self-start rounded-lg bg-[#2A2D33] py-[0.4375rem] pl-3 pr-2.5 data-[state=open]:stroke-focus">
         <span className="text-sm font-semibold text-white">
           {organization && <span className="font-normal text-[#A1A7B0]">{organization} / </span>}
-          {current?.name ?? (loading ? t('common.loading') : t('board.noProjects'))}
+          {allProjects ? t('board.allProjects') : (current?.name ?? (loading ? t('common.loading') : t('board.noProjects')))}
         </span>
         <ChevronsUpDown size={rem(14)} className="text-[#A1A7B0] group-data-[state=open]:hidden" />
         <ChevronsDownUp size={rem(14)} className="hidden text-[#A1A7B0] group-data-[state=open]:block" />
       </MenuTrigger>
       <MenuContent tone="dark" width={248} offset={10} title={t('board.projects')} className="max-h-[min(26.25rem,var(--radix-dropdown-menu-content-available-height))]">
-        <MenuRadioGroup value={current?.id} onValueChange={onSelect}>
-          {projects.map((project) => {
-            const selected = project.id === current?.id;
+        <MenuRadioGroup value={selectedId} onValueChange={onSelect}>
+          {options.map((project) => {
+            const selected = project.id === selectedId;
             return (
               <DropdownMenu.RadioItem
                 key={project.id}
@@ -156,12 +173,15 @@ export function ColumnsDropdown({
   hidden,
   counts,
   onChange,
+  columns = COLUMNS,
 }: {
   hidden: ColumnId[];
   counts: Partial<Record<ColumnId, number>>;
   onChange: (hidden: ColumnId[]) => void;
+  // As colunas que o board tem agora (com todos os projetos, só as de PR aberto).
+  columns?: typeof COLUMNS;
 }) {
-  const visible = COLUMNS.length - hidden.length;
+  const visible = columns.filter((column) => !hidden.includes(column.id)).length;
   const toggle = (id: ColumnId) => {
     if (hidden.includes(id)) onChange(hidden.filter((h) => h !== id));
     // Sempre sobra pelo menos uma coluna.
@@ -175,12 +195,12 @@ export function ColumnsDropdown({
         <Columns3 size={rem(14)} className="text-ink-2" />
         <span className="text-[0.8125rem] font-medium text-ink">{t('board.columns')}</span>
         <span className="rounded-lg bg-[#F1F5F9] px-1.5 py-px text-[0.71875rem] font-semibold text-ink-2">
-          {visible}/{COLUMNS.length}
+          {visible}/{columns.length}
         </span>
         <ChevronDown size={rem(14)} className="text-faint transition-transform group-data-[state=open]:rotate-180" />
       </MenuTrigger>
       <MenuContent title={t('board.visibleColumns')}>
-        {COLUMNS.map((column) => {
+        {columns.map((column) => {
           const shown = !hidden.includes(column.id);
           return (
             <MenuCheckboxItem

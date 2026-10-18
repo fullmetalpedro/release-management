@@ -13,6 +13,7 @@ export type ProviderId = z.infer<typeof providerId>;
 export type BoardColumnId = 'dependsOnMe' | 'review' | 'conflict' | 'ready';
 
 const repositoryRef = z.object({ id: z.string(), name: z.string() });
+const projectRef = z.object({ id: z.string(), name: z.string() });
 
 const personView = z.object({ name: z.string(), isMe: z.boolean(), avatarKey: optional(z.string()) });
 export type PersonView = z.infer<typeof personView>;
@@ -64,6 +65,8 @@ const pullRequestCard = z.object({
   reason: optional(z.enum(['reviewer', 'waiting-author'])),
   requiredReviewer: z.boolean(),
   webUrl: z.string(),
+  // Só no board de todos os projetos: de qual projeto é o PR.
+  project: optional(projectRef),
 });
 export type PullRequestCard = z.infer<typeof pullRequestCard>;
 
@@ -74,6 +77,17 @@ const board = z.object({
   repositories: z.array(repositoryRef),
 });
 export type Board = z.infer<typeof board>;
+
+const allProjectsBoard = z.object({
+  syncedAt: z.string(),
+  projects: z.array(projectRef),
+  items: z.array(
+    pullRequestCard.extend({ column: z.enum(['dependsOnMe', 'review', 'conflict', 'ready']), project: projectRef }),
+  ),
+  failed: z.array(z.object({ project: projectRef, reason: z.string() })),
+  skipped: z.number(),
+});
+export type AllProjectsBoard = z.infer<typeof allProjectsBoard>;
 
 const lanePullRequest = z.object({
   id: z.number(),
@@ -210,6 +224,7 @@ export const api = {
   removeConnection: (connectionId: string) => request('DELETE', `/auth/connections/${encodeURIComponent(connectionId)}`),
   projects: () => get('/api/projects', z.array(projectView)),
   board: (projectId: string) => get(`/api/projects/${encodeURIComponent(projectId)}/board`, board),
+  allProjectsBoard: () => get('/api/board/all', allProjectsBoard),
   lanes: (projectId: string) =>
     get(`/api/projects/${encodeURIComponent(projectId)}/lanes`, releaseLanes),
   lane: (projectId: string, repositoryId: string) =>

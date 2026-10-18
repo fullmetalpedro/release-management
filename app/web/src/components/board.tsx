@@ -6,6 +6,7 @@ import {
   GitCompareArrows,
   GitMerge,
   GitPullRequest,
+  Layers,
   MessageSquare,
   UserCheck,
   Users,
@@ -63,6 +64,13 @@ export function PrCard({ pr, now, color }: { pr: PullRequestCard; now: number; c
         </div>
         <span className="shrink-0 text-xs text-faint">{age(pr.createdAt, now)}</span>
       </div>
+
+      {pr.project && (
+        <span className="-mb-1 flex max-w-full items-center gap-1 self-start rounded bg-[#EEF2FF] px-1.5 py-0.5" title={t('card.project')}>
+          <Layers size={rem(11)} className="shrink-0 text-[#4F46E5]" />
+          <span className="truncate text-[0.6875rem] font-medium text-[#3730A3]">{pr.project.name}</span>
+        </span>
+      )}
 
       <p className="text-sm font-semibold leading-[1.35] text-ink">{pr.title}</p>
 
@@ -361,6 +369,30 @@ export function ReviewerScopeToggle({ value, onChange }: { value: ReviewerScope;
         })}
       </div>
     </div>
+  );
+}
+
+// No lugar de Mergeados e Release, com todos os projetos: as duas colunas dependem de um repositório.
+export function PerRepositoryPlaceholder({ onChooseProject }: { onChooseProject: () => void }) {
+  return (
+    <section
+      aria-label={t('board.perRepositoryTitle')}
+      className="stroke flex min-w-[14.0625rem] flex-[2] basis-0 flex-col items-center gap-3 self-start rounded-xl border-dashed bg-lane px-6 py-10 text-center [--stroke:#E2E8F0]"
+    >
+      <span className="flex gap-1.5">
+        <Dot color={COLUMNS.find((c) => c.id === 'merged')!.color} />
+        <Dot color={COLUMNS.find((c) => c.id === 'release')!.color} />
+      </span>
+      <p className="text-sm font-semibold text-ink">{t('board.perRepositoryTitle')}</p>
+      <p className="max-w-[22rem] text-[0.78125rem] leading-[1.45] text-mute">{t('board.perRepositoryBody')}</p>
+      <button
+        type="button"
+        onClick={onChooseProject}
+        className="stroke hover-surface rounded-lg bg-white px-3 py-[0.4375rem] text-[0.8125rem] font-medium text-ink"
+      >
+        {t('board.chooseProject')}
+      </button>
+    </section>
   );
 }
 
