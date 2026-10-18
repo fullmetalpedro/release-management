@@ -5,6 +5,7 @@ import {
   pullRequestIdsFromCommits,
   summarizePolicies,
   avatarKeyOf,
+  reviewerActivity,
   toDecision,
 } from '../src/adapters/azure-devops/sourceControl.ts';
 import {
@@ -209,6 +210,65 @@ describe('pull requests', () => {
       ['ana', 'approved', false],
     ]);
     expect(calls[0]!.query.get('searchCriteria.status')).toBe('active');
+  });
+
+  it('lê das threads de sistema quando cada revisor votou e foi incluído', () => {
+    const system = (type: string, date: string, props: Record<string, string>, identities: Record<string, ReturnType<typeof identity>>) => ({
+      publishedDate: date,
+      comments: [{ commentType: 'system' }],
+      properties: {
+        CodeReviewThreadType: { $value: type },
+        ...Object.fromEntries(Object.entries(props).map(([k, v]) => [k, { $value: v }])),
+      },
+      identities,
+    });
+    const activity = reviewerActivity([
+      system('ReviewersUpdate', '2026-10-11T08:00:00Z', { CodeReviewReviewersUpdatedAddedIdentity: '1' }, { 1: identity('alex', 'Alex') }),
+      system('VoteUpdate', '2026-10-12T09:00:00Z', { CodeReviewVotedByIdentity: '1', CodeReviewVoteResult: '-5' }, { 1: identity('sam', 'Sam') }),
+      // Votou de novo: vale o mais recente, mesmo que a thread venha antes na lista.
+      system('VoteUpdate', '2026-10-10T09:00:00Z', { CodeReviewVotedByIdentity: '1', CodeReviewVoteResult: '10' }, { 1: identity('sam', 'Sam') }),
+      system('RefUpdate', '2026-10-13T09:00:00Z', {}, {}),
+      { comments: [{ commentType: 'text' }] },
+    ]);
+    expect(Object.fromEntries(activity.addedAt)).toEqual({ alex: '2026-10-11T08:00:00Z' });
+    expect(Object.fromEntries(activity.votedAt)).toEqual({ sam: '2026-10-12T09:00:00Z' });
+  });
+
+  it('usa a última iteração como último push e cai na criação quando ela falha', async () => {
+    const active = (id: number) => ({
+      pullRequestId: id,
+      title: 't',
+      status: 'active',
+      createdBy: identity('alex', 'Alex Rivera'),
+      creationDate: '2026-10-10T12:00:00Z',
+      sourceRefName: 'refs/heads/f',
+      targetRefName: 'refs/heads/develop',
+      reviewers: [{ ...identity('sam', 'Sam Carter'), vote: 0 }],
+      repository: { id: 'repo-1', name: 'api', project: { id: 'proj-1' } },
+    });
+    const { client } = fakeAzure({
+      'GET /proj-1/_apis/git/pullrequests': () => ({ value: [active(1), active(2)] }),
+      'GET /pullRequests/1/iterations': () => ({
+        value: [
+          { id: 1, createdDate: '2026-10-10T12:00:00Z' },
+          { id: 2, createdDate: '2026-10-12T15:00:00Z' },
+        ],
+      }),
+      'GET /pullRequests/1/threads': () => ({
+        value: [
+          {
+            publishedDate: '2026-10-11T10:00:00Z',
+            properties: { CodeReviewThreadType: { $value: 'ReviewersUpdate' }, CodeReviewReviewersUpdatedAddedIdentity: { $value: '1' } },
+            identities: { 1: identity('sam', 'Sam Carter') },
+          },
+        ],
+      }),
+      'GET /pullRequests/2/iterations': () => new Response('{}', { status: 403 }),
+    });
+    const [first, second] = await new AzureDevOpsSourceControl(client, options).listOpenPullRequests('proj-1');
+    expect(first).toMatchObject({ lastPushAt: '2026-10-12T15:00:00Z', reviews: [{ reviewer: { id: 'sam' }, addedAt: '2026-10-11T10:00:00Z' }] });
+    expect(second!.lastPushAt).toBeUndefined();
+    expect(second!.reviews[0]!.addedAt).toBeUndefined();
   });
 
   it('ignora PR de outro repositório citado numa mensagem de commit', async () => {

@@ -55,7 +55,11 @@ interface GqlPull {
   author: GqlActor | null;
   repository: { name: string };
   reviewRequests: { nodes: { requestedReviewer: GqlActor | Record<string, never> | null }[] };
-  latestOpinionatedReviews: { nodes: { state: string; author: GqlActor | null }[] };
+  latestOpinionatedReviews: { nodes: { state: string; author: GqlActor | null; submittedAt?: string | null }[] };
+  // Quando cada revisor foi chamado (o pedido mais recente vale).
+  timelineItems?: { nodes: ({ createdAt: string; requestedReviewer: GqlActor | Record<string, never> | null } | Record<string, never> | null)[] };
+  // O último commit; o GitHub não diz quando ele chegou, e a data do commit é a aproximação do último push.
+  commits?: { nodes: { commit: { committedDate: string } }[] };
 }
 
 interface GhCommit {
@@ -81,7 +85,11 @@ const OPEN_PULLS = `query($q: String!, $cursor: String) {
         author { login ... on User { databaseId name } }
         repository { name }
         reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login databaseId name } } } }
-        latestOpinionatedReviews(first: 20) { nodes { state author { login ... on User { databaseId name } } } }
+        latestOpinionatedReviews(first: 20) { nodes { state submittedAt author { login ... on User { databaseId name } } } }
+        timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
+          nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login databaseId } } } }
+        }
+        commits(last: 1) { nodes { commit { committedDate } } }
       }
     }
   }
@@ -104,7 +112,17 @@ export function toMergeState(mergeable: GqlPull['mergeable']): MergeState {
 }
 
 // Quem já opinou entra com o voto; quem foi chamado e ainda não opinou entra como pendente.
-export function toReviews(pull: Pick<GqlPull, 'reviewRequests' | 'latestOpinionatedReviews'>): Review[] {
+export function toReviews(
+  pull: Pick<GqlPull, 'reviewRequests' | 'latestOpinionatedReviews' | 'timelineItems'>,
+): Review[] {
+  // Os eventos vêm do mais antigo para o mais recente: o último pedido de cada pessoa fica.
+  const requestedAt = new Map<string, string>();
+  for (const event of pull.timelineItems?.nodes ?? []) {
+    if (!event || !('createdAt' in event)) continue;
+    const actor = event.requestedReviewer;
+    if (!actor || !('login' in actor)) continue;
+    requestedAt.set(fromActor(actor as GqlActor).id, event.createdAt);
+  }
   const reviews = new Map<string, Review>();
   for (const review of pull.latestOpinionatedReviews.nodes) {
     const reviewer = fromActor(review.author);
@@ -113,6 +131,8 @@ export function toReviews(pull: Pick<GqlPull, 'reviewRequests' | 'latestOpiniona
       // "Changes requested" devolve a bola ao autor.
       decision: review.state === 'APPROVED' ? 'approved' : review.state === 'CHANGES_REQUESTED' ? 'waiting-author' : 'pending',
       required: false,
+      addedAt: requestedAt.get(reviewer.id),
+      votedAt: review.submittedAt ?? undefined,
     });
   }
   for (const request of pull.reviewRequests.nodes) {
@@ -120,7 +140,7 @@ export function toReviews(pull: Pick<GqlPull, 'reviewRequests' | 'latestOpiniona
     if (!actor || !('login' in actor)) continue;
     const reviewer = fromActor(actor as GqlActor);
     // Pedir revisão de novo zera o voto anterior da pessoa.
-    reviews.set(reviewer.id, { reviewer, decision: 'pending', required: false });
+    reviews.set(reviewer.id, { reviewer, decision: 'pending', required: false, addedAt: requestedAt.get(reviewer.id) });
   }
   return [...reviews.values()];
 }
@@ -258,6 +278,7 @@ export class GitHubSourceControl implements SourceControl {
         targetBranch: pull.baseRefName,
         author: fromActor(pull.author),
         createdAt: pull.createdAt,
+        lastPushAt: pull.commits?.nodes[0]?.commit.committedDate,
         status: 'open',
         isDraft: pull.isDraft,
         mergeState: toMergeState(pull.mergeable),

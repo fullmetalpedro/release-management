@@ -3,7 +3,7 @@ import { MemorySourceControl, MemoryWorkTracking } from '../src/adapters/memory/
 import { createWorld, SAM, ALEX } from '../src/adapters/memory/world.ts';
 import { CherryPickConflictError, ProviderUnavailableError, ValidationError } from '../src/core/domain/errors.ts';
 import type { PullRequest, ReviewDecision } from '../src/core/domain/types.ts';
-import { classify, getBoard } from '../src/core/usecases/board.ts';
+import { classify, getBoard, waitingSince } from '../src/core/usecases/board.ts';
 import { listProjects } from '../src/core/usecases/projects.ts';
 import { getReleaseDetails, suggestSearchTerm } from '../src/core/usecases/releaseDetails.ts';
 import { createRelease, getReleaseLane, getReleaseLanes } from '../src/core/usecases/releaseLane.ts';
@@ -102,6 +102,67 @@ describe('classificação do board', () => {
       [642, 'waiting-author', false],
       [1279, 'waiting-author', false],
     ]);
+  });
+});
+
+describe('há quanto tempo o PR espera', () => {
+  const created = '2026-10-01T00:00:00Z';
+  const review = (who: typeof ALEX, decision: ReviewDecision, dates: { addedAt?: string; votedAt?: string } = {}) => ({
+    reviewer: who,
+    decision,
+    required: false,
+    ...dates,
+  });
+
+  it('aguardando você: a minha inclusão ou o último push, e o voto de outro revisor não zera o relógio', () => {
+    const base = pr({
+      lastPushAt: '2026-10-02T00:00:00Z',
+      reviews: [
+        review(ALEX, 'pending', { addedAt: '2026-10-03T00:00:00Z' }),
+        // Outro revisor votou depois: o relógio de quem ainda deve a revisão continua.
+        review(SAM, 'approved', { votedAt: '2026-10-05T00:00:00Z' }),
+      ],
+    });
+    expect(waitingSince(base, ALEX, 'dependsOnMe', 'reviewer')).toBe('2026-10-03T00:00:00Z');
+    // Um push depois da minha inclusão pede uma nova olhada.
+    expect(waitingSince({ ...base, lastPushAt: '2026-10-04T00:00:00Z' }, ALEX, 'dependsOnMe', 'reviewer')).toBe(
+      '2026-10-04T00:00:00Z',
+    );
+  });
+
+  it('com o autor: o primeiro pedido de mudança que ainda vale', () => {
+    const mine = pr({
+      author: ALEX,
+      lastPushAt: '2026-10-06T00:00:00Z',
+      reviews: [
+        review(SAM, 'waiting-author', { votedAt: '2026-10-04T00:00:00Z' }),
+        review(SAM, 'rejected', { votedAt: '2026-10-03T00:00:00Z' }),
+        review(SAM, 'approved', { votedAt: '2026-10-02T00:00:00Z' }),
+      ],
+    });
+    expect(waitingSince(mine, ALEX, 'dependsOnMe', 'waiting-author')).toBe('2026-10-03T00:00:00Z');
+  });
+
+  it('em revisão e em conflito: o último push', () => {
+    const pushed = pr({ lastPushAt: '2026-10-04T00:00:00Z', reviews: [review(SAM, 'approved', { votedAt: '2026-10-05T00:00:00Z' })] });
+    expect(waitingSince(pushed, ALEX, 'review')).toBe('2026-10-04T00:00:00Z');
+    expect(waitingSince(pushed, ALEX, 'conflict')).toBe('2026-10-04T00:00:00Z');
+  });
+
+  it('sem os dados do provedor, vale a criação do PR', () => {
+    const bare = pr({}, [[ALEX, 'pending'], [SAM, 'waiting-author']]);
+    expect(waitingSince(bare, ALEX, 'dependsOnMe', 'reviewer')).toBe(created);
+    expect(waitingSince({ ...bare, author: ALEX }, ALEX, 'dependsOnMe', 'waiting-author')).toBe(created);
+    expect(waitingSince(bare, ALEX, 'review')).toBe(created);
+    // Um commit com data anterior à abertura não leva o relógio para antes da criação.
+    expect(waitingSince({ ...bare, lastPushAt: '2026-09-20T00:00:00Z' }, ALEX, 'conflict')).toBe(created);
+  });
+
+  it('o card leva a espera e se já há votos', async () => {
+    const board = await getBoard({ sourceControl: new MemorySourceControl(createWorld()) }, 'p-invoicing');
+    const cards = Object.values(board.columns).flat();
+    expect(cards.every((card) => !Number.isNaN(Date.parse(card.waitingSince)))).toBe(true);
+    expect(board.columns.review.find((c) => c.id === 1290)).toMatchObject({ hasVotes: false });
   });
 });
 
