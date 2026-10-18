@@ -309,6 +309,18 @@ export const pt = {
       },
     },
   },
+  newPrs: {
+    title_one: '{{count}} PR novo depende de você',
+    title_other: '{{count}} PRs novos dependem de você',
+    more_one: 'e mais {{count}}',
+    more_other: 'e mais {{count}}',
+    viewOnBoard: 'Ver no board',
+    badge: 'Novo',
+    notify: 'Avisar quando chegar PR que depende de mim',
+    notifyHint: 'Notificação do navegador, só com a aba em segundo plano.',
+    notifyDenied: 'Notificações bloqueadas. Libere nas permissões do site, no navegador.',
+    notifyUnsupported: 'Este navegador não mostra notificações.',
+  },
 };
 
 // Mesma forma, com textos livres: os outros idiomas não precisam repetir as frases do português.

@@ -15,6 +15,7 @@ import {
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { PullRequestCard } from '../lib/api';
 import { age, authorLabel } from '../lib/format';
+import { cardKey } from '../lib/newPrs';
 import { Avatar, cx, Dot, SkeletonCard } from './ui';
 import { t } from '../lib/i18n';
 import { rem } from '../lib/units';
@@ -43,15 +44,34 @@ export const COLUMNS = [
 ];
 
 // `color` é a cor que o usuário deu ao repositório: vira a borda do card, para reconhecer de longe de onde é o PR.
-export function PrCard({ pr, now, color }: { pr: PullRequestCard; now: number; color?: string }) {
+// `fresh`: o PR acabou de chegar em "Depende de mim" (badge Novo e um halo, até o próximo sync ou até ser aberto).
+export function PrCard({
+  pr,
+  now,
+  color,
+  fresh,
+  onOpen,
+}: {
+  pr: PullRequestCard;
+  now: number;
+  color?: string;
+  fresh?: boolean;
+  onOpen?: () => void;
+}) {
   return (
     <a
       href={pr.webUrl}
       target="_blank"
       rel="noreferrer"
+      data-fresh={fresh || undefined}
+      onClick={onOpen}
+      // Clique do meio também abre o PR, numa aba nova.
+      onAuxClick={(event) => event.button === 1 && onOpen?.()}
       className={cx(
         'stroke fade-up flex flex-col gap-2.5 rounded-lg bg-white p-3.5 hover:shadow-[0_0.375rem_1rem_#0F172A1A]',
         !color && 'hover:[--stroke:#94A3B8]',
+        fresh && 'shadow-[0_0_0_0.1875rem_#FDE68A] hover:shadow-[0_0_0_0.1875rem_#FDE68A,0_0.375rem_1rem_#0F172A1A]',
+        fresh && !color && '[--stroke:#F59E0B]',
       )}
       style={color ? ({ '--stroke': color, outlineWidth: 1.5, outlineOffset: -0.75 } as CSSProperties) : undefined}
     >
@@ -61,7 +81,12 @@ export function PrCard({ pr, now, color }: { pr: PullRequestCard; now: number; c
           <span className="truncate font-mono text-[0.71875rem] text-mute">{pr.repository.name}</span>
           <span className="font-mono text-[0.71875rem] text-faint">#{pr.id}</span>
         </div>
-        <span className="shrink-0 text-xs text-faint">{age(pr.createdAt, now)}</span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {fresh && (
+            <span className="rounded bg-[#F59E0B] px-1.5 py-px text-[0.6875rem] font-semibold text-white">{t('newPrs.badge')}</span>
+          )}
+          <span className="text-xs text-faint">{age(pr.createdAt, now)}</span>
+        </span>
       </div>
 
       <p className="text-sm font-semibold leading-[1.35] text-ink">{pr.title}</p>
@@ -377,6 +402,8 @@ export function OpenColumn({
   now,
   controls,
   repositoryColors,
+  fresh,
+  onOpen,
   emptyNote = t('board.noneFiltered'),
 }: {
   id: Exclude<ColumnId, 'merged' | 'release'>;
@@ -390,6 +417,9 @@ export function OpenColumn({
   controls?: ReactNode;
   // Cor que o usuário deu a cada repositório, por id.
   repositoryColors?: Record<string, string>;
+  // PRs que acabaram de chegar (por `cardKey`) e o aviso de que um deles foi aberto.
+  fresh?: ReadonlySet<string>;
+  onOpen?: (key: string) => void;
   emptyNote?: string;
 }) {
   if (loading) {
@@ -404,7 +434,14 @@ export function OpenColumn({
   return (
     <ColumnShell id={id} count={cards.length} top={controls}>
       {cards.map((pr) => (
-        <PrCard key={`${pr.provider}-${pr.repository.id}-${pr.id}`} pr={pr} now={now} color={repositoryColors?.[pr.repository.id]} />
+        <PrCard
+          key={cardKey(pr)}
+          pr={pr}
+          now={now}
+          color={repositoryColors?.[pr.repository.id]}
+          fresh={fresh?.has(cardKey(pr))}
+          onOpen={onOpen && (() => onOpen(cardKey(pr)))}
+        />
       ))}
       {cards.length === 0 && id === 'dependsOnMe' && emptyState && <EmptyState />}
       {cards.length === 0 && filtered && <QuietNote>{emptyNote}</QuietNote>}

@@ -311,4 +311,16 @@ export const en: Catalog = {
       },
     },
   },
+  newPrs: {
+    title_one: '{{count}} new PR is waiting on you',
+    title_other: '{{count}} new PRs are waiting on you',
+    more_one: 'and {{count}} more',
+    more_other: 'and {{count}} more',
+    viewOnBoard: 'View on board',
+    badge: 'New',
+    notify: 'Notify me when a PR starts waiting on me',
+    notifyHint: 'Browser notification, only while the tab is in the background.',
+    notifyDenied: "Notifications are blocked. Allow them in the browser's site permissions.",
+    notifyUnsupported: "This browser doesn't show notifications.",
+  },
 };

@@ -312,4 +312,16 @@ export const fr: Catalog = {
       },
     },
   },
+  newPrs: {
+    title_one: '{{count}} nouvelle PR vous attend',
+    title_other: '{{count}} nouvelles PR vous attendent',
+    more_one: 'et {{count}} autre',
+    more_other: 'et {{count}} autres',
+    viewOnBoard: 'Voir dans le board',
+    badge: 'Nouveau',
+    notify: 'Me prévenir quand une PR m’attend',
+    notifyHint: 'Notification du navigateur, seulement quand l’onglet est en arrière-plan.',
+    notifyDenied: 'Notifications bloquées. Autorisez-les dans les autorisations du site, dans le navigateur.',
+    notifyUnsupported: 'Ce navigateur n’affiche pas de notifications.',
+  },
 };
