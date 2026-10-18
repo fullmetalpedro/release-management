@@ -2,7 +2,7 @@ import { constants, createCipheriv, createHash, createPublicKey, publicEncrypt, 
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AZURE_DEVOPS_SCOPE, EntraIdentityProvider } from '../src/adapters/entra/identityProvider.ts';
 import type { PatValidator } from '../src/adapters/http/patProviders.ts';
 import { buildServer } from '../src/adapters/http/server.ts';
@@ -96,7 +96,62 @@ describe('sessões', () => {
 
     expect(readFileSync(file).toString('latin1')).not.toMatch(/secreto|Alex/);
     expect(new SessionStore(secret, file).get(session.id)?.tokens?.refreshToken).toBe('rt-secreto');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(new SessionStore('y'.repeat(32), file).get(session.id)).toBeUndefined();
+    // Trocar o segredo invalida o arquivo, e isso aparece no log.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('SESSION_SECRET mudou'));
+    warn.mockRestore();
+  });
+
+  it('sem arquivo gravado é o primeiro boot: nada a avisar', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    new SessionStore('x'.repeat(32), join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc'));
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  describe('validade', () => {
+    afterEach(() => vi.useRealTimers());
+    const hours = (n: number) => n * 60 * 60 * 1000;
+    const days = (n: number) => n * hours(24);
+
+    it('vence depois de SESSION_MAX_AGE_DAYS sem uso', () => {
+      vi.useFakeTimers({ toFake: ['Date'], now: 0 });
+      const store = new SessionStore('x'.repeat(32), undefined, { maxAgeDays: 7 });
+      expect(store.maxAgeMs).toBe(days(7));
+      const session = store.create({ mode: 'demo', user: { name: 'Alex' } });
+      vi.setSystemTime(days(7) - 1);
+      expect(store.get(session.id)).toBeDefined();
+      vi.setSystemTime(days(7) + 1);
+      expect(store.get(session.id)).toBeUndefined();
+    });
+
+    it('cada uso renova a validade, gravando no máximo uma vez por hora', () => {
+      vi.useFakeTimers({ toFake: ['Date'], now: 0 });
+      const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
+      const secret = 'x'.repeat(32);
+      const store = new SessionStore(secret, file, { maxAgeDays: 7 });
+      const session = store.create({ mode: 'demo', user: { name: 'Alex' } });
+      const written = () => readFileSync(file).toString('base64');
+
+      const before = written();
+      vi.setSystemTime(hours(1) - 1);
+      expect(store.touch(session.id)).toBe(false);
+      expect(written()).toBe(before);
+
+      // Usando todo dia, passa dos 7 dias contados da criação sem ser deslogado.
+      for (let day = 1; day <= 20; day++) {
+        vi.setSystemTime(days(day));
+        expect(store.touch(session.id)).toBe(true);
+      }
+      expect(written()).not.toBe(before);
+      expect(new SessionStore(secret, file, { maxAgeDays: 7 }).get(session.id)?.lastSeenAt).toBe(days(20));
+
+      // Parado por mais de 7 dias, vence.
+      vi.setSystemTime(days(27) + 1);
+      expect(store.touch(session.id)).toBe(false);
+      expect(store.get(session.id)).toBeUndefined();
+    });
   });
 });
 
@@ -107,6 +162,11 @@ describe('configuração', () => {
     expect(loadConfig({ AUTH_MODE: 'demo' })).toMatchObject({ demo: true, organization: 'demo' });
     expect(loadConfig({ SESSION_SECRET: 'x'.repeat(32) }).sessionFile).toMatch(/sessions\.enc$/);
     expect(() => loadConfig({ SESSION_SECRET: 'curto' })).toThrow('32 caracteres');
+    expect(loadConfig({}).sessionMaxAgeDays).toBe(30);
+    expect(loadConfig({ SESSION_MAX_AGE_DAYS: '7' }).sessionMaxAgeDays).toBe(7);
+    expect(loadConfig({ AUTH_MODE: 'demo', SESSION_MAX_AGE_DAYS: '7' }).sessionMaxAgeDays).toBe(7);
+    expect(() => loadConfig({ SESSION_MAX_AGE_DAYS: '0' })).toThrow('SESSION_MAX_AGE_DAYS');
+    expect(() => loadConfig({ SESSION_MAX_AGE_DAYS: 'sete' })).toThrow('SESSION_MAX_AGE_DAYS');
     expect(() => loadConfig({ ENTRA_CLIENT_ID: 'c' })).toThrow('SESSION_SECRET');
     const config = loadConfig({
       ENTRA_CLIENT_ID: 'c',
@@ -246,26 +306,31 @@ describe('conexão por token pessoal', () => {
   const token = 'pat-' + 'a'.repeat(60);
   const alex = { id: 'u1', name: 'Alex Rivera', email: 'alex.rivera@example.com' };
 
-  async function patServer(validatePat: PatValidator = async () => ({ owner: alex })) {
+  async function patServer(validatePat: PatValidator = async () => ({ owner: alex }), extraEnv: NodeJS.ProcessEnv = {}) {
     const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
-    const config = { ...loadConfig(env), sessionFile: file };
-    const sessions = new SessionStore(config.sessionSecret, file);
+    const config = { ...loadConfig({ ...env, ...extraEnv }), sessionFile: file };
+    const sessions = new SessionStore(config.sessionSecret, file, { maxAgeDays: config.sessionMaxAgeDays });
     // Os adapters reais chamariam os provedores; com uma organização ativa, os testes usam os de memória. As contas
     // em `rejected` têm o token recusado pelo provedor, como um PAT vencido.
     const registry = new ConnectionRegistry(config, sessions);
     const real = registry.for.bind(registry);
     const world = createWorld();
     const rejected = new Set<string>();
-    const memory = (account: string) => {
-      const sourceControl = new MemorySourceControl(world);
-      if (!rejected.has(account)) return sourceControl;
-      return new Proxy(sourceControl, { get: () => async () => { throw new NotAuthenticatedError(); } });
+    const memory = <T extends object>(account: string, adapter: T): T => {
+      if (!rejected.has(account)) return adapter;
+      return new Proxy(adapter, { get: () => async () => { throw new NotAuthenticatedError(); } });
     };
     registry.for = (session) => {
       const id = session.activeConnection;
       const active = connectionOf(session, id);
       if (!id || !active) return real(session);
-      return { sourceControl: expiringAs(id, active, memory(active.account)), workTracking: new MemoryWorkTracking(world) };
+      // Com o GitHub ativo, as tarefas vêm do Jira conectado, que também pode ter o token recusado.
+      const [jiraId, jira] = Object.entries(session.connections ?? {}).find(([, c]) => c.provider === 'jira') ?? [];
+      const workTracking =
+        active.provider === 'github' && jiraId && jira
+          ? expiringAs(jiraId, jira, memory(jira.account, new MemoryWorkTracking(world)))
+          : new MemoryWorkTracking(world);
+      return { sourceControl: expiringAs(id, active, memory(active.account, new MemorySourceControl(world))), workTracking };
     };
     const app = await buildServer({ config, sessions, registry, webDist: '/nao-existe', validatePat });
     // O mesmo envelope que o navegador monta: chave AES embrulhada com RSA-OAEP | IV | { nonce, token } em AES-GCM.
@@ -297,6 +362,7 @@ describe('conexão por token pessoal', () => {
       pat: true,
       demo: false,
       defaultOrganization: 'acme',
+      sessionsPersisted: true,
     });
     const login = await app.inject({ method: 'GET', url: '/auth/microsoft/login' });
     expect(login.headers.location).toBe('http://localhost:5173/login?erro=indisponivel');
@@ -492,6 +558,24 @@ describe('conexão por token pessoal', () => {
     expect(profile.accounts.find((a: { id?: string }) => a.id === 'azure-devops:northwind').expiredAt).toBeUndefined();
   });
 
+  it('um 401 do Jira, com o GitHub ativo, não desloga do GitHub', async () => {
+    const { app, connect, encrypt, cookieOf, me, rejected } = await patServer(async () => ({ owner: alex, cloudId: 'c1' }));
+    const cookie = cookieOf(await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }));
+    await connect('jira', { site: 'acme.atlassian.net', email: 'alex@example.com', encryptedToken: await encrypt(token) }, { cookie });
+    rejected.add('acme.atlassian.net');
+
+    const search = await app.inject({ method: 'GET', url: '/api/projects/p-invoicing/work-items?q=login', headers: { cookie } });
+    expect(search.statusCode).toBe(401);
+    expect(search.json()).toMatchObject({ code: 'connection-expired', connectionId: 'jira:acme.atlassian.net' });
+    expect(search.headers['set-cookie']).toBeUndefined();
+
+    // O GitHub segue ativo e funcionando; o Jira aparece pedindo reconexão e deixa de fornecer as tarefas.
+    expect((await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } })).statusCode).toBe(200);
+    const profile = await me(cookie);
+    expect(profile).toMatchObject({ source: { provider: 'github' }, tracker: null });
+    expect(profile.accounts.find((a: { id?: string }) => a.id === 'jira:acme.atlassian.net')).toMatchObject({ expiredAt: expect.any(String) });
+  });
+
   it('a sessão só acaba quando nenhuma organização sobra válida', async () => {
     const { app, connect, encrypt, cookieOf, rejected } = await patServer();
     const cookie = cookieOf(await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }));
@@ -528,6 +612,45 @@ describe('conexão por token pessoal', () => {
     const projects = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
     expect(projects.statusCode).toBe(400);
     expect(projects.json().message).toContain('Azure DevOps ou o GitHub');
+  });
+
+  it('SESSION_MAX_AGE_DAYS vale para o cookie, e o uso renova a sessão e o cookie', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.UTC(2026, 0, 1) });
+    try {
+      const { app, connect, encrypt, cookieOf, sessionOf } = await patServer(undefined, { SESSION_MAX_AGE_DAYS: '7' });
+      const login = await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) });
+      expect(String(login.headers['set-cookie'])).toMatch(/Max-Age=604800/);
+      const cookie = cookieOf(login);
+      const projects = () => app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
+      const day = 24 * 60 * 60 * 1000;
+
+      // Dentro da mesma hora o cookie não é reenviado.
+      expect((await projects()).headers['set-cookie']).toBeUndefined();
+
+      // Seis dias depois, ainda válida: o uso estende a sessão por mais 7 dias e reenvia o cookie.
+      vi.setSystemTime(Date.now() + 6 * day);
+      const renewed = await projects();
+      expect(renewed.statusCode).toBe(200);
+      expect(String(renewed.headers['set-cookie'])).toMatch(/^rm_session=[^;]{20,};.*Max-Age=604800/);
+      expect(sessionOf(cookie).lastSeenAt).toBe(Date.now());
+
+      // Mais seis dias: 12 desde a entrada, mas só 6 desde o último uso.
+      vi.setSystemTime(Date.now() + 6 * day);
+      expect((await projects()).statusCode).toBe(200);
+
+      // Oito dias parado: vence.
+      vi.setSystemTime(Date.now() + 8 * day);
+      expect((await projects()).statusCode).toBe(401);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sem SESSION_SECRET o /auth/mode avisa que as sessões não são persistidas', async () => {
+    const config = loadConfig({ AZDO_ORG: 'acme' });
+    const sessions = new SessionStore(config.sessionSecret, config.sessionFile);
+    const app = await buildServer({ config, sessions, registry: new ConnectionRegistry(config, sessions), webDist: '/nao-existe' });
+    expect((await app.inject({ method: 'GET', url: '/auth/mode' })).json()).toMatchObject({ sessionsPersisted: false });
   });
 
   it('sessão gravada no formato antigo continua valendo', () => {

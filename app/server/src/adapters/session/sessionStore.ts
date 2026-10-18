@@ -40,6 +40,8 @@ export interface Session {
   connections?: Record<string, PatConnection>;
   activeConnection?: string;
   createdAt: number;
+  // Último uso registrado. A validade conta a partir dele (expiração deslizante); sessões antigas não o têm.
+  lastSeenAt?: number;
 }
 
 type StoredSession = Session & {
@@ -70,20 +72,29 @@ function migrate(stored: StoredSession): Session {
   return session;
 }
 
-const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_SESSION_MAX_AGE_DAYS = 30;
+// O uso renova a validade, mas grava no máximo uma vez por hora por sessão, e não a cada requisição.
+const RENEW_INTERVAL_MS = 60 * 60 * 1000;
 // Teto de sessões vivas: acima dele saem as mais antigas, para a memória (e o arquivo) não crescerem sem limite.
 const MAX_SESSIONS = 10_000;
+
+const lastSeen = (session: Session) => session.lastSeenAt ?? session.createdAt;
 
 // Sessões ficam em memória e num arquivo cifrado, para os refresh tokens sobreviverem a um restart sem ficarem legíveis em disco.
 export class SessionStore {
   private readonly sessions = new Map<string, Session>();
   private readonly key: Buffer;
+  // Validade de uma sessão sem uso; o cookie usa o mesmo valor.
+  readonly maxAgeMs: number;
 
   constructor(
     secret: string,
     private readonly filePath?: string,
+    options: { maxAgeDays?: number } = {},
   ) {
     this.key = scryptSync(secret, 'release-management.sessions', 32);
+    this.maxAgeMs = (options.maxAgeDays ?? DEFAULT_SESSION_MAX_AGE_DAYS) * DAY_MS;
     this.load();
   }
 
@@ -102,7 +113,8 @@ export class SessionStore {
   }
 
   create(data: Omit<Session, 'id' | 'createdAt'>): Session {
-    const session: Session = { ...data, id: randomBytes(32).toString('base64url'), createdAt: Date.now() };
+    const now = Date.now();
+    const session: Session = { ...data, id: randomBytes(32).toString('base64url'), createdAt: now, lastSeenAt: now };
     this.sessions.set(session.id, session);
     this.dropExpired();
     for (const oldest of this.sessions.keys()) {
@@ -116,17 +128,33 @@ export class SessionStore {
   get(id: string | undefined): Session | undefined {
     if (!id) return undefined;
     const session = this.sessions.get(id);
-    if (session && Date.now() - session.createdAt > MAX_AGE_MS) {
+    if (session && this.isExpired(session)) {
       this.delete(id);
       return undefined;
     }
     return session;
   }
 
+  // Registra o uso: a validade recomeça a contar. Devolve true quando renovou (e gravou), para o cookie ser
+  // renovado junto; dentro do intervalo de renovação nada muda.
+  touch(id: string): boolean {
+    const session = this.get(id);
+    if (!session) return false;
+    const now = Date.now();
+    if (now - lastSeen(session) < RENEW_INTERVAL_MS) return false;
+    session.lastSeenAt = now;
+    this.persist();
+    return true;
+  }
+
+  private isExpired(session: Session, now = Date.now()) {
+    return now - lastSeen(session) > this.maxAgeMs;
+  }
+
   // Sessões vencidas que ninguém voltou a usar não ficam guardadas para sempre.
   private dropExpired() {
-    const limit = Date.now() - MAX_AGE_MS;
-    for (const [id, session] of this.sessions) if (session.createdAt < limit) this.sessions.delete(id);
+    const now = Date.now();
+    for (const [id, session] of this.sessions) if (this.isExpired(session, now)) this.sessions.delete(id);
   }
 
   // Altera a sessão no lugar e grava.
@@ -159,8 +187,14 @@ export class SessionStore {
       const json = Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
       for (const stored of JSON.parse(json) as StoredSession[]) this.sessions.set(stored.id, migrate(stored));
       this.dropExpired();
-    } catch {
-      // Arquivo ausente ou cifrado com outro segredo: começa sem sessões e os usuários entram de novo.
+    } catch (error) {
+      // Sem arquivo é o primeiro boot. Ilegível (outro SESSION_SECRET, arquivo corrompido): começa sem sessões e
+      // todos entram de novo, o que precisa aparecer no log.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      console.warn(
+        `Não foi possível ler as sessões gravadas em ${this.filePath} (${(error as Error).message}). ` +
+          'O SESSION_SECRET mudou ou o arquivo está corrompido: todos precisarão entrar de novo.',
+      );
     }
   }
 

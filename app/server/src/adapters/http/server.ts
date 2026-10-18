@@ -124,7 +124,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       sameSite: 'lax',
       secure,
       signed: true,
-      maxAge: 30 * 24 * 60 * 60,
+      // A mesma validade do store: ao renovar a sessão, o cookie é renovado junto.
+      maxAge: Math.floor(sessions.maxAgeMs / 1000),
     });
   };
 
@@ -138,6 +139,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   };
 
   app.addHook('onSend', async (_request, reply) => secureHeaders(reply));
+
+  // Expiração deslizante: quem usa o app não é deslogado. O store grava no máximo uma vez por hora por sessão, e só
+  // então o cookie é reenviado com a validade nova.
+  app.addHook('onRequest', async (request, reply) => {
+    const session = sessionOf(request);
+    if (session && sessions.touch(session.id)) startSession(reply, session);
+  });
 
   // As rotas de entrada são as únicas abertas a quem não tem sessão: limite por IP, somado entre elas.
   await app.register(rateLimit, {
@@ -223,6 +231,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     pat: !config.demo,
     demo: config.demo,
     defaultOrganization: config.demo ? '' : config.organization,
+    // Sem SESSION_SECRET as sessões ficam só em memória e caem a cada restart.
+    sessionsPersisted: !!config.sessionFile,
   }));
 
   if (!config.demo) {

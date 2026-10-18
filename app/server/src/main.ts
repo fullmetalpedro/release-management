@@ -5,7 +5,7 @@ import { loadConfig } from './config.ts';
 import { ConnectionRegistry } from './registry.ts';
 
 const config = loadConfig();
-const sessions = new SessionStore(config.sessionSecret, config.sessionFile);
+const sessions = new SessionStore(config.sessionSecret, config.sessionFile, { maxAgeDays: config.sessionMaxAgeDays });
 const identityProvider = config.entra ? new EntraIdentityProvider(config.entra) : undefined;
 const registry = new ConnectionRegistry(config, sessions, identityProvider);
 
@@ -15,5 +15,5 @@ await app.listen({ port: config.port, host: config.host });
 const methods = config.demo ? 'demonstração' : config.entra ? 'Microsoft e token pessoal' : 'token pessoal';
 console.log(`API em http://localhost:${config.port} · entrada por ${methods}`);
 if (!config.demo && !config.sessionFile) {
-  console.log('Sem SESSION_SECRET: as sessões não são gravadas e caem a cada restart.');
+  console.warn('AVISO: sem SESSION_SECRET as sessões não são gravadas e todos são deslogados a cada restart ou deploy.');
 }
