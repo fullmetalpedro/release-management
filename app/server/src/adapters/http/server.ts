@@ -16,6 +16,7 @@ import {
   ValidationError,
 } from '../../core/domain/errors.ts';
 import type { IdentityProvider } from '../../core/ports/identityProvider.ts';
+import { getAllProjectsBoard } from '../../core/usecases/allProjectsBoard.ts';
 import { getBoard } from '../../core/usecases/board.ts';
 import { listProjects } from '../../core/usecases/projects.ts';
 import { getReleaseDetails } from '../../core/usecases/releaseDetails.ts';
@@ -514,6 +515,21 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     });
 
     api.get('/projects', async (request) => listProjects(connection(request), config.projects));
+
+    // Fan-out pelos projetos da conexão; um projeto que falha vira aviso, e o motivo sai no idioma de quem pediu.
+    api.get('/board/all', async (request) =>
+      getAllProjectsBoard(
+        {
+          ...connection(request),
+          reasonOf: (error) => {
+            if (error instanceof LocalizedError) return error.messageIn(localeOf(request));
+            request.log.error(error);
+            return say(request, 'internalError');
+          },
+        },
+        config.projects,
+      ),
+    );
 
     api.get<{ Params: { projectId: string } }>('/projects/:projectId/board', async (request) =>
       getBoard(connection(request), request.params.projectId),

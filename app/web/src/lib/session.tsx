@@ -4,11 +4,17 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { api, ApiError, type Me, type ProjectView } from './api';
 import { useStoredState } from './format';
 
+// Valor guardado em rm.project quando o board mostra todos os projetos da organização.
+export const ALL_PROJECTS = '*';
+
 interface SessionContextValue {
   me: Me;
   projects: ProjectView[];
   projectsLoading: boolean;
+  // O projeto escolhido; com "Todos os projetos", o primeiro da lista, para as telas que precisam de um.
   project: ProjectView | undefined;
+  // "Todos os projetos" escolhido, numa organização com mais de um.
+  allProjects: boolean;
   selectProject: (id: string) => void;
 }
 
@@ -57,6 +63,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
       projects: list,
       projectsLoading: projects.isPending,
       project: list.find((p) => p.id === projectId) ?? list[0],
+      allProjects: projectId === ALL_PROJECTS && list.length > 1,
       selectProject: setProjectId,
     };
     // setProjectId muda a cada render, mas o estado que ele altera já está nas dependências.
