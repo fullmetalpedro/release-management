@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ClipboardList,
   ExternalLink,
+  FileText,
   GitBranch,
   GitMerge,
   Link as LinkIcon,
@@ -17,6 +18,7 @@ import {
 import { Popover } from 'radix-ui';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ReleaseNotesDialog } from '../components/releaseNotes';
 import { useToast } from '../components/toast';
 import { TopBar } from '../components/TopBar';
 import { Avatar, cx, RepoSelect } from '../components/ui';
@@ -285,6 +287,7 @@ export function ReleasePage() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState<number[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [freshLink, setFreshLink] = useState<{ pullRequestId: number; workItemId: number } | null>(null);
 
   const board = useQuery({
@@ -444,6 +447,15 @@ export function ReleasePage() {
               value={repositoryId}
               onChange={(id) => setParams({ repo: id })}
             />
+            <button
+              type="button"
+              onClick={() => setNotesOpen(true)}
+              disabled={!data || !release}
+              className="stroke flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-white px-3.5 py-2 hover-surface disabled:pointer-events-none disabled:bg-[#F1F5F9]"
+            >
+              <FileText size={rem(14)} className={release ? 'text-ink-2' : 'text-faint'} />
+              <span className={cx('text-[0.8125rem] font-semibold', release ? 'text-ink' : 'text-faint')}>{t('notes.open')}</span>
+            </button>
             <a
               href={release?.webUrl}
               target="_blank"
@@ -595,6 +607,7 @@ export function ReleasePage() {
         </div>
       </main>
       </div>
+      {data && release && <ReleaseNotesDialog details={data} jira={jira} open={notesOpen} onOpenChange={setNotesOpen} />}
     </div>
   );
 }

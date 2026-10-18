@@ -297,6 +297,28 @@ export const pt = {
       },
     },
   },
+  notes: {
+    open: 'Copiar notas',
+    title: 'Notas da release',
+    groupByType: 'Agrupar por tipo (feat/fix)',
+    includeLinks: 'Incluir links dos PRs',
+    includeUnlinked: 'Incluir PRs sem item vinculado',
+    includeUnlinkedJira: 'Incluir PRs sem issue vinculada',
+    formats: 'Formato das notas',
+    tab: { preview: 'Visualização', markdown: 'Markdown', text: 'Texto simples' },
+    copyMarkdown: 'Copiar markdown',
+    copyText: 'Copiar texto',
+    copiedMarkdown: 'Notas copiadas em markdown',
+    copiedText: 'Notas copiadas em texto simples',
+    copyFailed: 'Não foi possível copiar as notas',
+    copyUnavailable: 'O navegador não liberou a área de transferência.',
+    features: 'Funcionalidades',
+    fixes: 'Correções',
+    maintenance: 'Manutenção',
+    others: 'Outros',
+    unlinked: 'Sem item vinculado',
+    empty: 'Nenhum PR nesta release.',
+  },
 };
 
 // Mesma forma, com textos livres: os outros idiomas não precisam repetir as frases do português.
