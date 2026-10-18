@@ -299,4 +299,18 @@ export const en: Catalog = {
       },
     },
   },
+  waiting: {
+    you: 'Waiting on you for {{age}}',
+    author: 'With the author for {{age}}',
+    noReview: 'No review for {{age}}',
+    review: 'Awaiting review for {{age}}',
+    conflict: 'In conflict for {{age}}',
+    max: 'max {{age}}',
+    maxHint: 'Longest wait in this column',
+    stale_one: '{{count}} stuck for more than {{days}} days',
+    stale_other: '{{count}} stuck for more than {{days}} days',
+    sort: 'Sort',
+    sortProvider: 'default',
+    sortOldest: 'Oldest first',
+  },
 };

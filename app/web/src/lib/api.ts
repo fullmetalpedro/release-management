@@ -57,6 +57,8 @@ const pullRequestCard = z.object({
   noReviewers: z.boolean(),
   reason: optional(z.enum(['reviewer', 'waiting-author'])),
   requiredReviewer: z.boolean(),
+  waitingSince: z.string(),
+  hasVotes: z.boolean(),
   webUrl: z.string(),
 });
 export type PullRequestCard = z.infer<typeof pullRequestCard>;
