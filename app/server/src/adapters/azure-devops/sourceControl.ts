@@ -15,6 +15,7 @@ import type { CreateReleaseBranchInput, SourceControl } from '../../core/ports/s
 import { compareVersionsDesc, literalPrefix } from '../../core/usecases/releaseNaming.ts';
 import { AzureDevOpsHttpError, isTransientStatus, mapLimit, type AzureDevOpsClient } from './client.ts';
 import { msg } from '../../i18n.ts';
+import { IMPOSSIBLE_SHA, PROBE_BRANCH, writeAllowed } from '../writeProbe.ts';
 
 interface List<T> {
   value: T[];
@@ -213,6 +214,17 @@ export class AzureDevOpsSourceControl implements SourceControl {
         throw error;
       });
     return this.me;
+  }
+
+  // O token pode criar branches? Pede a remoção de uma branch que não existe: com permissão, o provedor responde que
+  // não havia o que remover; sem, recusa o pedido. Nada muda no repositório.
+  async probeWriteAccess(projectId: string): Promise<boolean | undefined> {
+    const [repository] = await this.listRepositories(projectId);
+    if (!repository) return undefined;
+    const repoPath = `/${encodeURIComponent(projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}`;
+    return writeAllowed(() =>
+      this.client.post(`${repoPath}/refs`, { body: [{ name: PROBE_BRANCH, oldObjectId: IMPOSSIBLE_SHA, newObjectId: ZERO_SHA }] }),
+    );
   }
 
   async getAvatar(avatarKey: string): Promise<Avatar | undefined> {

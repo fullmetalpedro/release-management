@@ -599,9 +599,9 @@ function OrgList({
               <span className={cx('truncate text-[0.78125rem]', expired ? 'text-[#B91C1C]' : 'text-mute')}>
                 {expired
                   ? t('pat.orgExpired', { date: shortDate(account.expiredAt) })
-                  : account.active
-                    ? t('pat.orgActive')
-                    : t('pat.orgConnected')}
+                  : `${account.active ? t('pat.orgActive') : t('pat.orgConnected')}${
+                      account.denied?.length ? ` · ${t('pat.orgReadOnly')}` : ''
+                    }`}
               </span>
             </div>
             {expired && (

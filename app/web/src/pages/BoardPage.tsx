@@ -211,7 +211,8 @@ export function BoardPage() {
         description: conflict
           ? t('board.conflictBody', { id: conflictingId, base: String(error.details.baseBranch) })
           : error.message,
-        action: { label: t('common.retry'), onClick: () => create.mutate(input) },
+        // Token só de leitura: tentar de novo daria no mesmo.
+        action: error instanceof ApiError && error.code === 'read-only' ? undefined : { label: t('common.retry'), onClick: () => create.mutate(input) },
       });
     },
   });
@@ -326,6 +327,7 @@ export function BoardPage() {
           failed={mergedFailed}
           state={createState}
           onSelectionChange={() => createState.status === 'failed' && setCreateState({ status: 'idle' })}
+          readOnly={!me.capabilities.createRelease}
           onCreate={(name, pullRequestIds) => {
             if (!projectId || !mergedRepo || creating.current) return;
             creating.current = true;

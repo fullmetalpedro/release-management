@@ -126,6 +126,7 @@ export const pt = {
     conflictBody: 'Conflito ao aplicar #{{id}} sobre {{base}}. Remova o PR da seleção ou resolva o conflito.',
   },
   lanes: {
+    readOnly: 'O token desta organização é só de leitura: para criar releases, reconecte com um token com escrita no código.',
     selectRepository: 'Selecione um repositório',
     noneSelected: 'Nenhum PR selecionado',
     selected_one: '{{count}} PR selecionado',
@@ -144,6 +145,8 @@ export const pt = {
     loadFailed: "Não foi possível carregar este repositório.",
   },
   release: {
+    readOnly: 'Somente leitura',
+    readOnlyHint: 'O token do {{tracker}} é só de leitura: para vincular PRs, reconecte com um token com escrita.',
     none: 'Sem release',
     back: 'Voltar ao board',
     openIn: 'Abrir no {{source}}',
@@ -189,6 +192,7 @@ export const pt = {
     loadFailed: "Não foi possível carregar a release",
   },
   account: {
+    readOnly: 'Somente leitura',
     menu: 'Contas',
     personalToken: 'Token pessoal',
     viaMicrosoft: 'Conectado via Microsoft',
@@ -221,6 +225,7 @@ export const pt = {
     failed: 'Não foi possível concluir o login com a Microsoft. Tente novamente.',
   },
   pat: {
+    orgReadOnly: 'somente leitura',
     platforms: 'PLATAFORMAS',
     connectedCount: '{{count}} de 3 conectadas',
     noToken: 'Nenhum token conectado',
@@ -287,7 +292,7 @@ export const pt = {
           { name: 'Project and Team', level: 'Read', description: 'Listar os projetos da organização' },
           { name: 'Identity', level: 'Read', description: 'Mostrar as fotos de perfil' },
         ],
-        note: 'O token só faz o que a sua conta já pode fazer. Para criar releases, você ainda precisa das permissões Contribute e Create branch no repositório.',
+        note: 'O token só faz o que a sua conta já pode fazer. Para criar releases, você ainda precisa das permissões Contribute e Create branch no repositório. Para só visualizar, marque Read nos escopos: criar releases e vincular PRs ficam desabilitados.',
       },
       github: {
         title: 'Token do GitHub',
@@ -305,7 +310,7 @@ export const pt = {
           { name: 'Pull requests', level: 'Read-only', description: 'Ler PRs, revisões e comentários' },
           { name: 'Metadata', level: 'Read-only', description: 'Obrigatória, o GitHub marca sozinho' },
         ],
-        note: 'O token só faz o que a sua conta já pode fazer. Para criar releases, você precisa de permissão Write nos repositórios.',
+        note: 'O token só faz o que a sua conta já pode fazer. Para criar releases, você precisa de permissão Write nos repositórios. Para só visualizar, deixe Contents como Read-only: criar releases fica desabilitado.',
       },
       jira: {
         title: 'Token do Jira',
@@ -323,7 +328,7 @@ export const pt = {
           { name: 'write:jira-work', level: 'Write', description: 'Vincular e desvincular PRs nas issues' },
           { name: 'read:jira-user', level: 'Read', description: 'Identificar a sua conta' },
         ],
-        note: 'O token só faz o que a sua conta já pode fazer. Para vincular PRs, você precisa poder editar as issues do projeto.',
+        note: 'O token só faz o que a sua conta já pode fazer. Para vincular PRs, você precisa poder editar as issues do projeto. Sem write:jira-work, o token só lê e vincular fica desabilitado.',
       },
     },
   },

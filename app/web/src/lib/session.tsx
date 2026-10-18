@@ -42,6 +42,18 @@ export function RequireSession({ children }: { children: ReactNode }) {
     refetchInterval: 5 * 60_000,
   });
 
+  // Uma escrita recusada por token só de leitura: a sessão recarrega para a interface desabilitar a ação.
+  useEffect(
+    () =>
+      queryClient.getMutationCache().subscribe((event) => {
+        const error = event.mutation?.state.error;
+        if (event.type === 'updated' && error instanceof ApiError && error.code === 'read-only') {
+          void queryClient.invalidateQueries({ queryKey: ['me'] });
+        }
+      }),
+    [queryClient],
+  );
+
   useEffect(
     () =>
       queryClient.getQueryCache().subscribe((event) => {

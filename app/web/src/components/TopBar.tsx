@@ -78,11 +78,13 @@ function AccountMenu({ me }: { me: Me }) {
           <span className="truncate text-xs text-[#8B919A]">
             {expired
               ? t('account.expiredOn', { date: shortDate(account.expiredAt) })
-              : account.active
-                ? t('account.activeShowing')
-                : account.provider === 'jira'
-                  ? t('account.connected')
-                  : account.handle}
+              : `${
+                  account.active
+                    ? t('account.activeShowing')
+                    : account.provider === 'jira'
+                      ? t('account.connected')
+                      : account.handle
+                }${account.denied?.length ? ` · ${t('account.readOnly')}` : ''}`}
           </span>
         </div>
         {account.active && !expired && <Check size={rem(14)} className="shrink-0 text-white" />}

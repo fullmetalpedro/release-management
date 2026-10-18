@@ -8,6 +8,7 @@ import {
   GitMerge,
   Link as LinkIcon,
   LoaderCircle,
+  Lock,
   Minimize2,
   RefreshCw,
   Search,
@@ -237,13 +238,19 @@ function UnlinkedRow({
   onLink: (pr: LanePullRequest, item: WorkItem, done: () => void) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const { tracker } = useSession().me;
+  const { tracker, capabilities } = useSession().me;
   return (
     <div className="flex items-center gap-4 px-5 py-3">
       <div className="flex min-w-0 flex-1 basis-0">
         {/* Com o GitHub sem Jira não há de onde buscar tasks. */}
         {!tracker && <span className="ml-7 text-[0.8125rem] text-faint">{t('release.connectJira')}</span>}
-        {tracker && (
+        {tracker && !capabilities.linkWorkItems && (
+          <span className="ml-7 flex items-center gap-1.5 text-[0.8125rem] text-faint" title={t('release.readOnlyHint', { tracker: tracker.name })}>
+            <Lock size={rem(12)} />
+            {t('release.readOnly')}
+          </span>
+        )}
+        {tracker && capabilities.linkWorkItems && (
           <Popover.Root open={open} onOpenChange={setOpen}>
             <Popover.Trigger className="stroke ml-7 flex items-center gap-1.5 rounded-md bg-white px-2.5 py-[0.3125rem] [--stroke:#FCD34D] hover:bg-[#FEF3C7] hover:[--stroke:#F59E0B] data-[state=open]:bg-[#FEF3C7] data-[state=open]:[--stroke:#F59E0B]">
               <LinkIcon size={rem(13)} className="text-[#B45309]" />

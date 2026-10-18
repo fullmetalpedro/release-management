@@ -13,6 +13,7 @@ import { loadConfig } from '../src/config.ts';
 import { NotAuthenticatedError } from '../src/core/domain/errors.ts';
 import type { IdentityProvider } from '../src/core/ports/identityProvider.ts';
 import { ConnectionRegistry, expiringAs } from '../src/registry.ts';
+import type { WorkTracking } from '../src/core/ports/workTracking.ts';
 
 const entra = {
   tenantId: 'tenant-1',
@@ -316,9 +317,18 @@ describe('conexão por token pessoal', () => {
     const real = registry.for.bind(registry);
     const world = createWorld();
     const rejected = new Set<string>();
+    // Contas com token só de leitura: leem normalmente, e o provedor recusa as escritas com 401.
+    const readOnly = new Set<string>();
+    const writes = new Set(['createReleaseBranch', 'linkPullRequest', 'unlinkPullRequest']);
     const memory = <T extends object>(account: string, adapter: T): T => {
-      if (!rejected.has(account)) return adapter;
-      return new Proxy(adapter, { get: () => async () => { throw new NotAuthenticatedError(); } });
+      if (rejected.has(account)) return new Proxy(adapter, { get: () => async () => { throw new NotAuthenticatedError(); } });
+      if (readOnly.has(account)) {
+        return new Proxy(adapter, {
+          get: (object, property, receiver) =>
+            writes.has(String(property)) ? async () => { throw new NotAuthenticatedError(); } : Reflect.get(object, property, receiver),
+        });
+      }
+      return adapter;
     };
     registry.for = (session) => {
       const id = session.activeConnection;
@@ -326,11 +336,14 @@ describe('conexão por token pessoal', () => {
       if (!id || !active) return real(session);
       // Com o GitHub ativo, as tarefas vêm do Jira conectado, que também pode ter o token recusado.
       const [jiraId, jira] = Object.entries(session.connections ?? {}).find(([, c]) => c.provider === 'jira') ?? [];
-      const workTracking =
-        active.provider === 'github' && jiraId && jira
-          ? expiringAs(jiraId, jira, memory(jira.account, new MemoryWorkTracking(world)))
-          : new MemoryWorkTracking(world);
-      return { sourceControl: expiringAs(id, active, memory(active.account, new MemorySourceControl(world))), workTracking };
+      const sourceControl = memory(active.account, new MemorySourceControl(world));
+      const verify = () => sourceControl.listProjects();
+      let workTracking: WorkTracking = expiringAs(id, active, memory(active.account, new MemoryWorkTracking(world)), verify);
+      if (active.provider === 'github') {
+        const tracking = jiraId && jira ? memory(jira.account, new MemoryWorkTracking(world)) : undefined;
+        workTracking = tracking ? expiringAs(jiraId!, jira!, tracking, () => tracking.searchWorkItems('', 'x')) : new MemoryWorkTracking(world);
+      }
+      return { sourceControl: expiringAs(id, active, sourceControl, verify), workTracking };
     };
     registry.sources = (session) =>
       Object.entries(session.connections ?? {})
@@ -367,7 +380,7 @@ describe('conexão por token pessoal', () => {
       [response.headers['set-cookie']].flat().map(String).find((c) => /^rm_session=[^;]{20,}/.test(c))!.split(';')[0]!;
     const me = async (cookie: string) => (await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
     const sessionOf = (cookie: string) => sessions.get(decodeURIComponent(cookie).match(/rm_session=([^.]+)\./)![1])!;
-    return { app, sessions, file, encrypt, connect, cookieOf, me, rejected, sessionOf };
+    return { app, sessions, file, encrypt, connect, cookieOf, me, rejected, readOnly, sessionOf };
   }
 
   it('está sempre disponível; sem app registration o login com Microsoft é anunciado como indisponível', async () => {
@@ -610,6 +623,69 @@ describe('conexão por token pessoal', () => {
     // A recusa marcou a organização, sem derrubar a sessão.
     const profile = await me(cookie);
     expect(profile.accounts.find((a: { id?: string }) => a.id === 'github:acme-gh').expiredAt).toEqual(expect.any(String));
+  });
+
+  it('token só de leitura: criar release é recusado sem expirar a organização', async () => {
+    const { app, connect, encrypt, cookieOf, me, readOnly } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    readOnly.add('contoso');
+    expect((await me(cookie)).capabilities).toEqual({ createRelease: true, linkWorkItems: true });
+
+    const [project] = (await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } })).json();
+    const { lanes } = (await app.inject({ method: 'GET', url: `/api/projects/${project.id}/lanes`, headers: { cookie } })).json();
+    const lane = lanes.find((candidate: { merged: unknown[] }) => candidate.merged.length > 0);
+    const create = () =>
+      app.inject({
+        method: 'POST',
+        url: `/api/projects/${project.id}/repositories/${lane.repository.id}/releases`,
+        headers: { cookie, 'x-requested-with': 'fetch' },
+        payload: { name: 'release/99.0', pullRequestIds: [lane.merged[0].id] },
+      });
+
+    const refused = await create();
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toMatchObject({ code: 'read-only', capability: 'createRelease', connectionId: 'azure-devops:contoso' });
+    expect(refused.json().message).toContain('contoso');
+
+    // A organização continua valendo: só criar release fica desabilitado.
+    const profile = await me(cookie);
+    expect(profile.capabilities).toEqual({ createRelease: false, linkWorkItems: true });
+    expect(profile.accounts[0]).toMatchObject({ id: 'azure-devops:contoso', denied: ['createRelease'] });
+    expect(profile.accounts[0].expiredAt).toBeUndefined();
+    expect((await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } })).statusCode).toBe(200);
+    // Da segunda vez, nem chama o provedor.
+    readOnly.delete('contoso');
+    expect((await create()).statusCode).toBe(403);
+  });
+
+  it('as escritas negadas na conexão já desabilitam a ação, antes de chamar o provedor', async () => {
+    const { app, connect, encrypt, cookieOf, me } = await patServer(async () => ({ owner: alex, denied: ['linkWorkItems'] }));
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    expect((await me(cookie)).capabilities).toEqual({ createRelease: true, linkWorkItems: false });
+    const link = await app.inject({
+      method: 'PUT',
+      url: '/api/projects/p1/repositories/r1/pull-requests/1/work-items/2',
+      headers: { cookie, 'x-requested-with': 'fetch' },
+    });
+    expect(link.statusCode).toBe(403);
+    expect(link.json()).toMatchObject({ code: 'read-only', capability: 'linkWorkItems' });
+    // Reconectar com um token que escreve libera a ação.
+    await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }, { cookie });
+  });
+
+  it('numa escrita, um token vencido de verdade continua expirando a organização', async () => {
+    const { app, connect, encrypt, cookieOf, rejected } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('azure-devops', { organization: 'fabrikam', encryptedToken: await encrypt(token) }, { cookie });
+    rejected.add('fabrikam');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/p1/repositories/r1/releases',
+      headers: { cookie, 'x-requested-with': 'fetch' },
+      payload: { name: 'release/99.0', pullRequestIds: [1] },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ code: 'connection-expired', connectionId: 'azure-devops:fabrikam' });
   });
 
   it('a sessão só acaba quando nenhuma organização sobra válida', async () => {

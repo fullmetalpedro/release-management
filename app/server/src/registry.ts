@@ -5,9 +5,9 @@ import { GitHubSourceControl } from './adapters/github/sourceControl.ts';
 import { JiraWorkTracking, NoWorkTracking } from './adapters/jira/workTracking.ts';
 import { MemorySourceControl, MemoryWorkTracking } from './adapters/memory/memoryAdapters.ts';
 import { createWorld } from './adapters/memory/world.ts';
-import { connectionOf, type PatConnection, type Session, type SessionStore } from './adapters/session/sessionStore.ts';
+import { connectionOf, type Capability, type PatConnection, type Session, type SessionStore } from './adapters/session/sessionStore.ts';
 import type { AppConfig } from './config.ts';
-import { ConnectionExpiredError, NotAuthenticatedError, ValidationError } from './core/domain/errors.ts';
+import { ConnectionExpiredError, NotAuthenticatedError, ValidationError, WriteNotAllowedError } from './core/domain/errors.ts';
 import type { IdentityProvider, TokenSet } from './core/ports/identityProvider.ts';
 import type { SourceControl } from './core/ports/sourceControl.ts';
 import type { WorkTracking } from './core/ports/workTracking.ts';
@@ -108,30 +108,23 @@ export class ConnectionRegistry {
 
     if (id && active?.provider === 'azure-devops') {
       const { sourceControl, workTracking } = this.azureDevOps(active.account, async () => basicFromPat(this.token(session.id, id)), fetchImpl);
-      return { sourceControl: expiringAs(id, active, sourceControl), workTracking: expiringAs(id, active, workTracking) };
+      const verify = () => sourceControl.listProjects();
+      return { sourceControl: expiringAs(id, active, sourceControl, verify), workTracking: expiringAs(id, active, workTracking, verify) };
     }
     if (id && active?.provider === 'github') {
       const [jiraId, jira] = Object.entries(connections).find(([, connection]) => connection.provider === 'jira') ?? [];
+      const github = new GitHubSourceControl(
+        { owner: active.account, releasePattern: branching.releasePattern, developBranch: branching.developBranch },
+        async () => this.token(session.id, id),
+        fetchImpl,
+      );
+      const tracking =
+        jiraId && jira?.cloudId && jira.email
+          ? new JiraWorkTracking({ site: jira.account, cloudId: jira.cloudId, email: jira.email }, async () => this.token(session.id, jiraId))
+          : undefined;
       return {
-        sourceControl: expiringAs(
-          id,
-          active,
-          new GitHubSourceControl(
-            { owner: active.account, releasePattern: branching.releasePattern, developBranch: branching.developBranch },
-            async () => this.token(session.id, id),
-            fetchImpl,
-          ),
-        ),
-        workTracking:
-          jiraId && jira?.cloudId && jira.email
-            ? expiringAs(
-                jiraId,
-                jira,
-                new JiraWorkTracking({ site: jira.account, cloudId: jira.cloudId, email: jira.email }, async () =>
-                  this.token(session.id, jiraId),
-                ),
-              )
-            : new NoWorkTracking(),
+        sourceControl: expiringAs(id, active, github, () => github.listRepositories(active.account)),
+        workTracking: tracking ? expiringAs(jiraId!, jira!, tracking, () => tracking.currentUser()) : new NoWorkTracking(),
       };
     }
     throw new ValidationError(msg('connectSource'));
@@ -170,21 +163,41 @@ export class ConnectionRegistry {
   }
 }
 
+// Métodos das portas que escrevem no provedor, e a ação que cada um representa.
+const WRITES: Partial<Record<string, Capability>> = {
+  createReleaseBranch: 'createRelease',
+  linkPullRequest: 'linkWorkItems',
+  unlinkPullRequest: 'linkWorkItems',
+};
+
 // Um token recusado pelo provedor vira a expiração daquela conexão, e não da sessão: o erro diz qual conexão caiu.
-export function expiringAs<T extends object>(id: string, connection: PatConnection, target: T): T {
-  const expired = (error: unknown) => {
+// Numa escrita, a recusa pode ser só falta de permissão de escrita (token só de leitura); `verify` faz uma leitura
+// que separa os dois casos: se ela passa, só a ação fica bloqueada e a conexão continua valendo.
+export function expiringAs<T extends object>(id: string, connection: PatConnection, target: T, verify?: () => Promise<unknown>): T {
+  const expired = (error: unknown): never => {
     throw error instanceof NotAuthenticatedError ? new ConnectionExpiredError(id, connection.account) : error;
+  };
+  const refusedWrite = async (error: unknown, capability: Capability): Promise<never> => {
+    if (!(error instanceof NotAuthenticatedError) || !verify) return expired(error);
+    try {
+      await verify();
+    } catch (check) {
+      return expired(check);
+    }
+    throw new WriteNotAllowedError(id, connection.account, capability);
   };
   return new Proxy(target, {
     get(object, property, receiver) {
       const value = Reflect.get(object, property, receiver);
       if (typeof value !== 'function') return value;
+      const capability = typeof property === 'string' ? WRITES[property] : undefined;
+      const onError = capability ? (error: unknown) => refusedWrite(error, capability) : expired;
       return (...args: unknown[]) => {
         try {
           const result = value.apply(object, args);
-          return result instanceof Promise ? result.catch(expired) : result;
+          return result instanceof Promise ? result.catch(onError) : result;
         } catch (error) {
-          return expired(error);
+          return onError(error);
         }
       };
     },

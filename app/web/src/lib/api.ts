@@ -27,6 +27,8 @@ const me = z.object({
   // De onde vêm os PRs e de onde vêm as tasks; sem tracker (GitHub sem Jira) não há tasks a vincular.
   source: platform.nullable(),
   tracker: platform.nullable(),
+  // O que dá para escrever com os tokens atuais. Token só de leitura desabilita a ação, sem derrubar o resto.
+  capabilities: z.object({ createRelease: z.boolean(), linkWorkItems: z.boolean() }),
   // Uma linha por organização conectada (modo token), agrupadas por plataforma; plataforma sem nenhuma aparece uma
   // vez, desconectada.
   accounts: z.array(
@@ -39,6 +41,8 @@ const me = z.object({
       account: optional(z.string()),
       // O provedor recusou o token: a organização pede para reconectar.
       expiredAt: optional(z.string()),
+      // Escritas que o token não pode fazer (token só de leitura).
+      denied: optional(z.array(z.enum(['createRelease', 'linkWorkItems']))),
     }),
   ),
 });

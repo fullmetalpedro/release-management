@@ -6,6 +6,17 @@ import type { TokenSet } from '../../core/ports/identityProvider.ts';
 export type PatProvider = 'azure-devops' | 'github' | 'jira';
 export type SourceProvider = Exclude<PatProvider, 'jira'>;
 
+// O que o app escreve no provedor. Um token só de leitura continua valendo para o resto: só estas ações ficam
+// desabilitadas.
+export type Capability = 'createRelease' | 'linkWorkItems';
+
+// Quais escritas cada plataforma faz: criar a branch de release no código, vincular PRs nas tarefas.
+export const CAPABILITIES: Record<PatProvider, Capability[]> = {
+  'azure-devops': ['createRelease', 'linkWorkItems'],
+  github: ['createRelease'],
+  jira: ['linkWorkItems'],
+};
+
 export interface PatConnection {
   provider: PatProvider;
   // Organização (Azure DevOps), dono (GitHub) ou site (Jira).
@@ -21,6 +32,9 @@ export interface PatConnection {
   name?: string;
   // O provedor recusou o token: a conexão continua listada, pedindo para reconectar, e as outras seguem valendo.
   expiredAt?: number;
+  // Escritas que o token não tem permissão de fazer (token só de leitura). Ausente: todas permitidas ou ainda não
+  // testadas; uma escrita recusada depois entra aqui.
+  denied?: Capability[];
 }
 
 // Uma conexão por organização: `azure-devops:contoso`, `github:acme-labs`. Organização e dono não diferenciam

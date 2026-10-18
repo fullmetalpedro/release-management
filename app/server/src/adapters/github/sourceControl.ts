@@ -15,6 +15,7 @@ import type { CreateReleaseBranchInput, SourceControl } from '../../core/ports/s
 import { compareVersionsDesc, literalPrefix } from '../../core/usecases/releaseNaming.ts';
 import { isHttpStatus, JsonClient, type FetchLike } from '../http-json.ts';
 import { msg } from '../../i18n.ts';
+import { IMPOSSIBLE_SHA, PROBE_BRANCH, writeAllowed } from '../writeProbe.ts';
 
 interface GhUser {
   id: number;
@@ -186,6 +187,16 @@ export class GitHubSourceControl implements SourceControl {
         'User-Agent': 'release-management',
       }),
     });
+  }
+
+  // O token pode criar branches? Pede uma branch apontando para um commit que não existe: com permissão, o GitHub
+  // recusa o commit; sem, recusa o pedido. Nada é criado.
+  async probeWriteAccess(): Promise<boolean | undefined> {
+    const [repository] = await this.listRepositories(this.options.owner);
+    if (!repository) return undefined;
+    return writeAllowed(() =>
+      this.client.json(`${this.repo(repository)}/git/refs`, { method: 'POST', body: { ref: PROBE_BRANCH, sha: IMPOSSIBLE_SHA } }),
+    );
   }
 
   private repo(repository: Repository) {

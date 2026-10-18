@@ -9,6 +9,7 @@ import {
   CherryPickConflictError,
   ConnectionExpiredError,
   LocalizedError,
+  WriteNotAllowedError,
   NotAuthenticatedError,
   NotFoundError,
   ProviderUnavailableError,
@@ -35,7 +36,7 @@ import {
 } from './patProviders.ts';
 import { PatTransport } from './patTransport.ts';
 import { ALEX } from '../memory/world.ts';
-import { connectionId, connectionOf, type PatConnection, type PatProvider, type Session, type SessionStore, type SourceProvider } from '../session/sessionStore.ts';
+import { CAPABILITIES, connectionId, connectionOf, type Capability, type PatConnection, type PatProvider, type Session, type SessionStore, type SourceProvider } from '../session/sessionStore.ts';
 import { localeFrom, msg, render } from '../../i18n.ts';
 
 const SESSION_COOKIE = 'rm_session';
@@ -182,8 +183,36 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     return true;
   };
 
+  // A conexão que faz esta escrita: a ativa (código e, no Azure DevOps, as tarefas) ou, com o GitHub, o Jira.
+  const writerOf = (session: Session, capability: Capability): [string, PatConnection] | undefined => {
+    const active = connectionOf(session, session.activeConnection);
+    if (!active) return undefined;
+    if (CAPABILITIES[active.provider].includes(capability)) return [session.activeConnection!, active];
+    return Object.entries(session.connections ?? {}).find(([, connection]) => CAPABILITIES[connection.provider].includes(capability));
+  };
+  const canWrite = (session: Session, capability: Capability) =>
+    session.mode !== 'pat' || !writerOf(session, capability)?.[1].denied?.includes(capability);
+  // Já se sabe que o token não escreve: recusa antes de chamar o provedor.
+  const requireWrite = (request: FastifyRequest, capability: Capability) => {
+    const session = sessionOf(request);
+    if (!session || canWrite(session, capability)) return;
+    const [id, connection] = writerOf(session, capability)!;
+    throw new WriteNotAllowedError(id, connection.account, capability);
+  };
+
   app.setErrorHandler((error, request, reply) => {
     const message = error instanceof LocalizedError ? error.messageIn(localeOf(request)) : '';
+    if (error instanceof WriteNotAllowedError) {
+      const session = sessionOf(request);
+      if (session) {
+        sessions.update(session.id, (stored) => {
+          const connection = connectionOf(stored, error.connectionId);
+          if (connection && !connection.denied?.includes(error.capability)) connection.denied = [...(connection.denied ?? []), error.capability];
+        });
+        registry.forget(session.id);
+      }
+      return reply.status(403).send({ code: 'read-only', connectionId: error.connectionId, capability: error.capability, message });
+    }
     if (error instanceof ConnectionExpiredError) {
       if (expireConnection(request, reply, error)) {
         return reply.status(401).send({ code: 'connection-expired', connectionId: error.connectionId, message });
@@ -280,7 +309,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         throw error;
       }
 
-      const { owner, cloudId } = validation;
+      const { owner, cloudId, denied } = validation;
       const id = connectionId(provider, account);
       const connection: PatConnection = {
         provider,
@@ -290,6 +319,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         name: owner.name,
         email,
         cloudId,
+        ...(denied?.length ? { denied } : {}),
       };
       const current = sessionOf(request);
       if (current?.mode === 'pat') {
@@ -501,6 +531,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         organization: active?.account ?? config.organization,
         source: source ? { provider: source, name: PROVIDER_LABELS[source] } : null,
         tracker: tracker ? { provider: tracker, name: PROVIDER_LABELS[tracker] } : null,
+        // O que dá para escrever com os tokens atuais; token só de leitura desabilita a ação na interface.
+        capabilities: { createRelease: canWrite(current, 'createRelease'), linkWorkItems: canWrite(current, 'linkWorkItems') },
         // Agrupadas por plataforma, Azure DevOps sempre primeiro; é a ordem em que aparecem na interface. Plataforma
         // sem nenhuma organização aparece uma vez, desconectada.
         accounts: PAT_PROVIDERS.flatMap((provider) => {
@@ -521,6 +553,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             handle: connection.handle ?? connection.account,
             account: connection.account,
             ...(connection.expiredAt ? { expiredAt: new Date(connection.expiredAt).toISOString() } : {}),
+            ...(connection.denied?.length ? { denied: connection.denied } : {}),
           }));
         }),
       };
@@ -600,6 +633,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     api.post<{ Params: RepoParams; Body: { name?: unknown; pullRequestIds?: unknown } }>(
       '/projects/:projectId/repositories/:repositoryId/releases',
       async (request, reply) => {
+        requireWrite(request, 'createRelease');
         const { name, pullRequestIds } = request.body ?? {};
         if (typeof name !== 'string' || !Array.isArray(pullRequestIds) || pullRequestIds.length === 0 || !pullRequestIds.every(isPositiveInteger)) {
           throw new ValidationError(msg('branchAndPrsRequired'));
@@ -633,11 +667,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     });
 
     api.put<{ Params: LinkParams }>(linkRoute, async (request, reply) => {
+      requireWrite(request, 'linkWorkItems');
       await linkWorkItem(connection(request), Number(request.params.workItemId), refOf(request.params));
       return reply.status(204).send();
     });
 
     api.delete<{ Params: LinkParams }>(linkRoute, async (request, reply) => {
+      requireWrite(request, 'linkWorkItems');
       await unlinkWorkItem(connection(request), Number(request.params.workItemId), refOf(request.params));
       return reply.status(204).send();
     });

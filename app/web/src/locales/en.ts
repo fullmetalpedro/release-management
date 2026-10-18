@@ -128,6 +128,7 @@ export const en: Catalog = {
     conflictBody: 'Conflict applying #{{id}} onto {{base}}. Remove that PR from the selection or resolve the conflict.',
   },
   lanes: {
+    readOnly: "This organization's token is read-only: to create releases, reconnect with a token that can write code.",
     selectRepository: 'Select a repository',
     noneSelected: 'No PRs selected',
     selected_one: '{{count}} PR selected',
@@ -146,6 +147,8 @@ export const en: Catalog = {
     loadFailed: "Couldn't load this repository.",
   },
   release: {
+    readOnly: 'Read-only',
+    readOnlyHint: 'The {{tracker}} token is read-only: to link pull requests, reconnect with a token that can write.',
     none: 'No release',
     back: 'Back to board',
     openIn: 'Open in {{source}}',
@@ -191,6 +194,7 @@ export const en: Catalog = {
     loadFailed: "Couldn't load the release",
   },
   account: {
+    readOnly: 'Read-only',
     menu: 'Accounts',
     personalToken: 'Personal access token',
     viaMicrosoft: 'Signed in with Microsoft',
@@ -223,6 +227,7 @@ export const en: Catalog = {
     failed: "Couldn't complete Microsoft sign-in. Please try again.",
   },
   pat: {
+    orgReadOnly: 'read-only',
     platforms: 'PLATFORMS',
     connectedCount: '{{count}} of 3 connected',
     noToken: 'No token connected',
@@ -289,7 +294,7 @@ export const en: Catalog = {
           { name: 'Project and Team', level: 'Read', description: "List the organization's projects" },
           { name: 'Identity', level: 'Read', description: 'Show profile photos' },
         ],
-        note: "A token can only do what your account already can. To create releases you also need the Contribute and Create branch permissions on the repository.",
+        note: "A token can only do what your account already can. To create releases you also need the Contribute and Create branch permissions on the repository. To only view, pick Read for the scopes: creating releases and linking pull requests are turned off.",
       },
       github: {
         title: 'GitHub token',
@@ -307,7 +312,7 @@ export const en: Catalog = {
           { name: 'Pull requests', level: 'Read-only', description: 'Read PRs, reviews and comments' },
           { name: 'Metadata', level: 'Read-only', description: 'Required; GitHub selects it for you' },
         ],
-        note: 'A token can only do what your account already can. To create releases you need Write access to the repositories.',
+        note: 'A token can only do what your account already can. To create releases you need Write access to the repositories. To only view, keep Contents as Read-only: creating releases is turned off.',
       },
       jira: {
         title: 'Jira token',
@@ -325,7 +330,7 @@ export const en: Catalog = {
           { name: 'write:jira-work', level: 'Write', description: 'Link and unlink PRs on work items' },
           { name: 'read:jira-user', level: 'Read', description: 'Identify your account' },
         ],
-        note: "A token can only do what your account already can. To link PRs you need permission to edit the space's work items.",
+        note: "A token can only do what your account already can. To link PRs you need permission to edit the space's work items. Without write:jira-work the token only reads, and linking is turned off.",
       },
     },
   },

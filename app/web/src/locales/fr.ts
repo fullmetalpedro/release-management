@@ -129,6 +129,7 @@ export const fr: Catalog = {
     conflictBody: "Conflit lors de l'application de #{{id}} sur {{base}}. Retirez ce PR de la sélection ou résolvez le conflit.",
   },
   lanes: {
+    readOnly: "Le jeton de cette organisation est en lecture seule : pour créer des releases, reconnectez-vous avec un jeton qui peut écrire le code.",
     selectRepository: 'Sélectionnez un référentiel',
     noneSelected: 'Aucun PR sélectionné',
     selected_one: '{{count}} PR sélectionné',
@@ -147,6 +148,8 @@ export const fr: Catalog = {
     loadFailed: "Impossible de charger ce référentiel.",
   },
   release: {
+    readOnly: 'Lecture seule',
+    readOnlyHint: "Le jeton {{tracker}} est en lecture seule : pour lier des pull requests, reconnectez-vous avec un jeton qui peut écrire.",
     none: 'Aucune release',
     back: 'Retour au tableau',
     openIn: 'Ouvrir dans {{source}}',
@@ -192,6 +195,7 @@ export const fr: Catalog = {
     loadFailed: "Impossible de charger la release",
   },
   account: {
+    readOnly: 'Lecture seule',
     menu: 'Comptes',
     personalToken: "Jeton d'accès personnel",
     viaMicrosoft: 'Connecté avec Microsoft',
@@ -224,6 +228,7 @@ export const fr: Catalog = {
     failed: 'Impossible de terminer la connexion avec Microsoft. Réessayez.',
   },
   pat: {
+    orgReadOnly: 'lecture seule',
     platforms: 'PLATEFORMES',
     connectedCount: '{{count}} sur 3 connectées',
     noToken: 'Aucun jeton connecté',
@@ -290,7 +295,7 @@ export const fr: Catalog = {
           { name: 'Projet et équipe', level: 'Lecture', description: "Lister les projets de l'organisation" },
           { name: 'Identité', level: 'Lecture', description: 'Afficher les photos de profil' },
         ],
-        note: 'Un jeton ne peut pas faire plus que votre compte. Pour créer des releases, il vous faut aussi les autorisations Contribuer et Créer une branche sur le référentiel.',
+        note: 'Un jeton ne peut pas faire plus que votre compte. Pour créer des releases, il vous faut aussi les autorisations Contribuer et Créer une branche sur le référentiel. Pour seulement consulter, choisissez Read pour les étendues : la création de releases et la liaison des PR sont désactivées.',
       },
       github: {
         title: 'Jeton GitHub',
@@ -308,7 +313,7 @@ export const fr: Catalog = {
           { name: 'Pull requests', level: 'Read-only', description: 'Lire les PR, les revues et les commentaires' },
           { name: 'Metadata', level: 'Read-only', description: 'Obligatoire ; GitHub la coche pour vous' },
         ],
-        note: 'Un jeton ne peut pas faire plus que votre compte. Pour créer des releases, il vous faut un accès en écriture (Write) aux dépôts.',
+        note: 'Un jeton ne peut pas faire plus que votre compte. Pour créer des releases, il vous faut un accès en écriture (Write) aux dépôts. Pour seulement consulter, laissez Contents en Read-only : la création de releases est désactivée.',
       },
       jira: {
         title: 'Jeton Jira',
@@ -326,7 +331,7 @@ export const fr: Catalog = {
           { name: 'write:jira-work', level: 'Écriture', description: 'Lier et délier des PR sur les tickets' },
           { name: 'read:jira-user', level: 'Lecture', description: 'Identifier votre compte' },
         ],
-        note: 'Un jeton ne peut pas faire plus que votre compte. Pour lier des PR, vous devez pouvoir modifier les tickets du projet.',
+        note: 'Un jeton ne peut pas faire plus que votre compte. Pour lier des PR, vous devez pouvoir modifier les tickets du projet. Sans write:jira-work, le jeton ne fait que lire et la liaison est désactivée.',
       },
     },
   },
