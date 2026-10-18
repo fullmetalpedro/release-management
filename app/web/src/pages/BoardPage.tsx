@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowDownWideNarrow } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -8,6 +9,7 @@ import {
   OpenColumn,
   PerRepositoryPlaceholder,
   ReviewerScopeToggle,
+  WaitingMax,
   type ColumnId,
   type ReviewerScope,
 } from '../components/board';
@@ -31,6 +33,7 @@ import { LANE_STALE_MS, laneKey, SYNC_INTERVAL_MS, useAllLanes } from '../lib/la
 import { ALL_PROJECTS, useSession } from '../lib/session';
 import { t } from '../lib/i18n';
 import { rem } from '../lib/units';
+import { sortCards, STALE_DAYS, WAITING_COLUMNS, waitingBand, type SortOrder } from '../lib/waiting';
 
 const OPEN_COLUMNS: BoardColumnId[] = ['dependsOnMe', 'review', 'conflict', 'ready'];
 
@@ -48,6 +51,7 @@ const isColorChoice = (value: unknown): value is Record<string, Record<string, s
   isRecord(value) && Object.values(value).every((colors) => isRecord(colors) && Object.values(colors).every(isHexColor));
 const isColorList = (value: unknown): value is string[] => Array.isArray(value) && value.every(isHexColor);
 const isReviewerScope = (value: unknown): value is ReviewerScope => value === 'all' || value === 'required';
+const isSortOrder = (value: unknown): value is SortOrder => value === 'provider' || value === 'oldest';
 
 // O board de todos os projetos no formato do board de um projeto: os cards por coluna e os repositórios que aparecem
 // neles (com o projeto de cada um, para guardar a cor no projeto certo).
@@ -87,6 +91,7 @@ export function BoardPage() {
   const [hidden, setHidden] = useStoredState<ColumnId[]>('rm.hiddenColumns', [], isColumnList);
   const [laneRepos, setLaneRepos] = useStoredState<Record<string, { merged?: string; release?: string }>>('rm.laneRepos', {}, isLaneChoice);
   const [reviewerScope, setReviewerScope] = useStoredState<ReviewerScope>('rm.reviewerScope', 'all', isReviewerScope);
+  const [sortOrder, setSortOrder] = useStoredState<SortOrder>('rm.sortOrder', 'provider', isSortOrder);
   const [colorChoices, setColorChoices] = useStoredState<Record<string, Record<string, string>>>('rm.repoColors', {}, isColorChoice);
   const [customColors, setCustomColors] = useStoredState<string[]>('rm.customColors', [], isColorList);
   const [createState, setCreateState] = useState<CreateState>({ status: 'idle' });
@@ -244,7 +249,9 @@ export function BoardPage() {
         pr.author.name.toLowerCase().includes(term) ||
         (pr.author.isMe && t('common.you').toLowerCase().includes(term)));
     const columns = boardData?.columns;
-    const result = Object.fromEntries(OPEN_COLUMNS.map((id) => [id, (columns?.[id] ?? []).filter(matches)])) as Record<
+    const result = Object.fromEntries(
+      OPEN_COLUMNS.map((id) => [id, sortCards((columns?.[id] ?? []).filter(matches), sortOrder)]),
+    ) as Record<
       BoardColumnId,
       PullRequestCard[]
     >;
@@ -253,10 +260,15 @@ export function BoardPage() {
       result.dependsOnMe = result.dependsOnMe.filter((pr) => pr.reason !== 'reviewer' || pr.requiredReviewer);
     }
     return result;
-  }, [boardData, authorFilter, repositoryFilter, targetFilter, search, reviewerScope]);
+  }, [boardData, authorFilter, repositoryFilter, targetFilter, search, reviewerScope, sortOrder]);
 
-  const dependsOnMe = (boardData?.columns.dependsOnMe ?? []).filter(
+  const myCards = (boardData?.columns.dependsOnMe ?? []).filter(
     (pr) => reviewerScope === 'all' || pr.reason !== 'reviewer' || pr.requiredReviewer,
+  );
+  const dependsOnMe = myCards.length;
+  // PRs parados (na faixa vermelha) nas colunas de espera, como o resto do subtítulo: sem os filtros da toolbar.
+  const stale = WAITING_COLUMNS.flatMap((id) => (id === 'dependsOnMe' ? myCards : (boardData?.columns[id] ?? []))).filter(
+    (pr) => waitingBand(pr.waitingSince, now) === 'stale',
   ).length;
   const optionalHidden =
     reviewerScope === 'required' &&
@@ -354,6 +366,7 @@ export function BoardPage() {
             <ReviewerScopeToggle value={reviewerScope} onChange={setReviewerScope} />
           ) : undefined
         }
+        headerAction={column.id === 'dependsOnMe' ? <WaitingMax cards={filtered.dependsOnMe} now={now} /> : undefined}
         now={now}
       />
     );
@@ -390,6 +403,12 @@ export function BoardPage() {
                 ) : (
                   <span className="font-semibold text-[#16A34A]">{t('board.nothingOnYou')}</span>
                 )}
+                {stale > 0 && (
+                  <>
+                    <span className="text-[#CBD5E1]">·</span>
+                    <span className="font-semibold text-[#DC2626]">{t('waiting.stale', { count: stale, days: STALE_DAYS })}</span>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -424,6 +443,15 @@ export function BoardPage() {
             options={targets}
             value={targetFilter}
             onChange={setTargetFilter}
+          />
+          <FilterSelect
+            icon={ArrowDownWideNarrow}
+            label={t('waiting.sort')}
+            allLabel={t('waiting.sortProvider')}
+            options={[{ id: 'oldest', name: t('waiting.sortOldest') }]}
+            value={sortOrder === 'oldest' ? 'oldest' : null}
+            onChange={(value) => setSortOrder(value === 'oldest' ? 'oldest' : 'provider')}
+            plain
           />
           <ColumnsDropdown hidden={hidden} counts={counts} onChange={setHidden} columns={boardColumns} />
           <SearchBox value={search} onChange={setSearch} />

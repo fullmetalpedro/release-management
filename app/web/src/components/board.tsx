@@ -1,8 +1,7 @@
 import {
   CheckCheck,
   CircleCheck,
-  CornerUpLeft,
-  Eye,
+  Clock3,
   GitCompareArrows,
   GitMerge,
   GitPullRequest,
@@ -14,8 +13,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import type { PullRequestCard } from '../lib/api';
+import type { BoardColumnId, PullRequestCard } from '../lib/api';
 import { age, authorLabel } from '../lib/format';
+import { oldestWaiting, WAITING_COLUMNS, waitingBand, waitingLabel, type WaitingBand } from '../lib/waiting';
 import { Avatar, cx, Dot, SkeletonCard } from './ui';
 import { t } from '../lib/i18n';
 import { rem } from '../lib/units';
@@ -43,8 +43,40 @@ export const COLUMNS = [
   column('release', '#8B5CF6'),
 ];
 
+// Cores do relógio por faixa de espera: neutro, âmbar e vermelho.
+const BAND_TONE: Record<WaitingBand, { chip: string; icon: string; text: string }> = {
+  fresh: { chip: 'bg-[#F1F5F9]', icon: 'text-mute', text: 'text-ink-2' },
+  attention: { chip: 'bg-[#FEF3C7]', icon: 'text-[#B45309]', text: 'text-[#92400E]' },
+  stale: { chip: 'bg-[#FEE2E2]', icon: 'text-[#DC2626]', text: 'text-[#991B1B]' },
+};
+
+// "Aguardando você há 3d": há quanto tempo o PR espera por alguém, na cor da faixa.
+function WaitingBadge({ pr, column, now }: { pr: PullRequestCard; column: BoardColumnId; now: number }) {
+  const tone = BAND_TONE[waitingBand(pr.waitingSince, now)];
+  const hint = pr.reason === 'reviewer' ? t('card.reviewer') : pr.reason === 'waiting-author' ? t('card.waitingAuthor') : undefined;
+  return (
+    <span className={cx('flex items-center gap-1.5 self-start rounded px-2 py-1', tone.chip)} title={hint}>
+      <Clock3 size={rem(12)} className={tone.icon} />
+      <span className={cx('text-xs font-medium', tone.text)}>{t(waitingLabel(pr, column), { age: age(pr.waitingSince, now) })}</span>
+    </span>
+  );
+}
+
+// Maior espera da coluna, no cabeçalho ("máx. 4d").
+export function WaitingMax({ cards, now }: { cards: PullRequestCard[]; now: number }) {
+  const since = oldestWaiting(cards);
+  if (!since) return null;
+  return (
+    <span className={cx('flex items-center gap-1 text-xs font-semibold', BAND_TONE[waitingBand(since, now)].icon)} title={t('waiting.maxHint')}>
+      <Clock3 size={rem(12)} />
+      {t('waiting.max', { age: age(since, now) })}
+    </span>
+  );
+}
+
 // `color` é a cor que o usuário deu ao repositório: vira a borda do card, para reconhecer de longe de onde é o PR.
-export function PrCard({ pr, now, color }: { pr: PullRequestCard; now: number; color?: string }) {
+// `column` é onde o card está: nas colunas de espera, o card mostra há quanto tempo o PR aguarda alguém.
+export function PrCard({ pr, now, color, column }: { pr: PullRequestCard; now: number; color?: string; column: BoardColumnId }) {
   return (
     <a
       href={pr.webUrl}
@@ -74,18 +106,7 @@ export function PrCard({ pr, now, color }: { pr: PullRequestCard; now: number; c
 
       <p className="text-sm font-semibold leading-[1.35] text-ink">{pr.title}</p>
 
-      {pr.reason === 'reviewer' && (
-        <span className="flex items-center gap-1.5 self-start rounded bg-[#FEF3C7] px-2 py-1">
-          <Eye size={rem(12)} className="text-[#B45309]" />
-          <span className="text-xs font-medium text-[#92400E]">{t('card.reviewer')}</span>
-        </span>
-      )}
-      {pr.reason === 'waiting-author' && (
-        <span className="flex items-center gap-1.5 self-start rounded bg-[#FFEDD5] px-2 py-1">
-          <CornerUpLeft size={rem(12)} className="text-[#C2410C]" />
-          <span className="text-xs font-medium text-[#9A3412]">{t('card.waitingAuthor')}</span>
-        </span>
-      )}
+      {WAITING_COLUMNS.includes(column) && <WaitingBadge pr={pr} column={column} now={now} />}
 
       <div className="flex items-center gap-1.5">
         <GitMerge size={rem(13)} className="shrink-0 text-faint" />
@@ -408,6 +429,7 @@ export function OpenColumn({
   filtered,
   now,
   controls,
+  headerAction,
   repositoryColors,
   emptyNote = t('board.noneFiltered'),
 }: {
@@ -420,6 +442,7 @@ export function OpenColumn({
   now: number;
   // Controles próprios da coluna, logo abaixo do cabeçalho.
   controls?: ReactNode;
+  headerAction?: ReactNode;
   // Cor que o usuário deu a cada repositório, por id.
   repositoryColors?: Record<string, string>;
   emptyNote?: string;
@@ -434,9 +457,15 @@ export function OpenColumn({
     );
   }
   return (
-    <ColumnShell id={id} count={cards.length} top={controls}>
+    <ColumnShell id={id} count={cards.length} top={controls} headerAction={headerAction}>
       {cards.map((pr) => (
-        <PrCard key={`${pr.provider}-${pr.repository.id}-${pr.id}`} pr={pr} now={now} color={repositoryColors?.[pr.repository.id]} />
+        <PrCard
+          key={`${pr.provider}-${pr.repository.id}-${pr.id}`}
+          pr={pr}
+          now={now}
+          color={repositoryColors?.[pr.repository.id]}
+          column={id}
+        />
       ))}
       {cards.length === 0 && id === 'dependsOnMe' && emptyState && <EmptyState />}
       {cards.length === 0 && filtered && <QuietNote>{emptyNote}</QuietNote>}

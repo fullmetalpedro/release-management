@@ -64,7 +64,7 @@ export async function getAllProjectsBoard(
     }
     for (const pr of result.pullRequests) {
       const { column, reason } = classify(pr, me);
-      items.push({ ...toCard(pr, me, reason), column, project: result.project });
+      items.push({ ...toCard(pr, me, column, reason), column, project: result.project });
     }
   }
 

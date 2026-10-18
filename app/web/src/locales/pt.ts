@@ -327,6 +327,20 @@ export const pt = {
       },
     },
   },
+  waiting: {
+    you: 'Aguardando você há {{age}}',
+    author: 'Com o autor há {{age}}',
+    noReview: 'Sem revisão há {{age}}',
+    review: 'Aguardando revisão há {{age}}',
+    conflict: 'Em conflito há {{age}}',
+    max: 'máx. {{age}}',
+    maxHint: 'Maior espera nesta coluna',
+    stale_one: '{{count}} parado há mais de {{days}} dias',
+    stale_other: '{{count}} parados há mais de {{days}} dias',
+    sort: 'Ordem',
+    sortProvider: 'padrão',
+    sortOldest: 'Mais antigos primeiro',
+  },
 };
 
 // Mesma forma, com textos livres: os outros idiomas não precisam repetir as frases do português.

@@ -28,6 +28,10 @@ export interface PullRequestCard {
   reason?: DependsOnMeReason;
   // Sou revisor obrigatório deste PR (e não apenas opcional).
   requiredReviewer: boolean;
+  // Desde quando o PR espera por alguém, conforme o motivo de estar na coluna (ver waitingSince).
+  waitingSince: string;
+  // Alguém já votou: em "Em revisão", separa "sem revisão" de "aguardando revisão".
+  hasVotes: boolean;
   webUrl: string;
 }
 
@@ -72,7 +76,40 @@ export function classify(pr: PullRequest, me: Person): { column: BoardColumnId; 
   return { column: 'review' };
 }
 
-export function toCard(pr: PullRequest, me: Person, reason?: DependsOnMeReason): PullRequestCard {
+const time = (iso: string | undefined) => (iso ? Date.parse(iso) : NaN);
+
+function latest(dates: (string | undefined)[]): string | undefined {
+  return dates.reduce<string | undefined>((best, date) => (time(date) > (time(best) || -Infinity) ? date : best), undefined);
+}
+
+function earliest(dates: (string | undefined)[]): string | undefined {
+  return dates.reduce<string | undefined>((best, date) => (time(date) < (time(best) || Infinity) ? date : best), undefined);
+}
+
+// Desde quando o PR espera, por motivo: o voto de outra pessoa não zera o relógio de quem ainda deve a revisão.
+// Sem os dados do provedor, vale a criação do PR.
+export function waitingSince(pr: PullRequest, me: Person, column: BoardColumnId, reason?: DependsOnMeReason): string {
+  let since: string | undefined;
+  if (reason === 'reviewer') {
+    // Minha inclusão como revisor ou o último push, o que vier depois: o push pede uma nova olhada.
+    const mine = pr.reviews.find((r) => r.reviewer.id === me.id);
+    since = latest([mine?.addedAt, pr.lastPushAt]);
+  } else if (reason === 'waiting-author') {
+    // O primeiro pedido de mudança que ainda vale: desde ele a bola está com o autor.
+    since = earliest(
+      pr.reviews.filter((r) => r.decision === 'waiting-author' || r.decision === 'rejected').map((r) => r.votedAt),
+    );
+  } else if (column === 'ready') {
+    since = latest(pr.reviews.filter((r) => r.decision === 'approved').map((r) => r.votedAt)) ?? pr.lastPushAt;
+  } else {
+    // Em revisão e em conflito: o último push. A API não diz quando o conflito surgiu; o push é uma aproximação.
+    since = pr.lastPushAt;
+  }
+  // Nunca antes da criação do PR (um commit pode ter data anterior à abertura).
+  return latest([since, pr.createdAt]) ?? pr.createdAt;
+}
+
+export function toCard(pr: PullRequest, me: Person, column: BoardColumnId, reason?: DependsOnMeReason): PullRequestCard {
   return {
     id: pr.id,
     provider: pr.provider,
@@ -89,6 +126,8 @@ export function toCard(pr: PullRequest, me: Person, reason?: DependsOnMeReason):
     noReviewers: pr.reviews.length === 0,
     reason,
     requiredReviewer: pr.reviews.some((r) => r.reviewer.id === me.id && r.required),
+    waitingSince: waitingSince(pr, me, column, reason),
+    hasVotes: pr.reviews.some((r) => r.decision !== 'pending'),
     webUrl: pr.webUrl,
   };
 }
@@ -107,7 +146,7 @@ export async function getBoard(
   // A ordem dentro de cada coluna é a do provedor.
   for (const pr of pullRequests) {
     const { column, reason } = classify(pr, me);
-    columns[column].push(toCard(pr, me, reason));
+    columns[column].push(toCard(pr, me, column, reason));
   }
 
   return {

@@ -330,4 +330,18 @@ export const fr: Catalog = {
       },
     },
   },
+  waiting: {
+    you: 'Vous attend depuis {{age}}',
+    author: "Chez l'auteur depuis {{age}}",
+    noReview: 'Sans revue depuis {{age}}',
+    review: 'En attente de revue depuis {{age}}',
+    conflict: 'En conflit depuis {{age}}',
+    max: 'max. {{age}}',
+    maxHint: 'Attente la plus longue de cette colonne',
+    stale_one: '{{count}} bloqué depuis plus de {{days}} jours',
+    stale_other: '{{count}} bloqués depuis plus de {{days}} jours',
+    sort: 'Tri',
+    sortProvider: 'par défaut',
+    sortOldest: "Les plus anciennes d'abord",
+  },
 };

@@ -46,7 +46,8 @@ export const SAM: Person = { id: 'u-sam', name: 'Sam Carter', email: 'sam.carter
 const AMY: Person = { id: 'u-amy', name: 'Amy Chen', email: 'amy.chen@example.com' };
 const BEN: Person = { id: 'u-ben', name: 'Ben Fischer', email: 'ben.fischer@example.com' };
 
-type Vote = [Person, ReviewDecision, required?: boolean];
+// O quarto item é há quanto tempo a pessoa votou.
+type Vote = [Person, ReviewDecision, required?: boolean, votedAgo?: number];
 
 export function createWorld(now = Date.now()): World {
   const projects: Project[] = [
@@ -93,7 +94,12 @@ export function createWorld(now = Date.now()): World {
       mergeState: 'clean',
       conflictCount: 0,
       commentCount: 0,
-      reviews: votes.map(([reviewer, decision, required]) => ({ reviewer, decision, required: required ?? false })),
+      reviews: votes.map(([reviewer, decision, required, votedAgo]) => ({
+        reviewer,
+        decision,
+        required: required ?? false,
+        votedAt: votedAgo === undefined ? undefined : ago(votedAgo),
+      })),
       webUrl: `https://dev.azure.com/demo/${repository.projectId}/_git/${repoName}/pullrequest/${id}`,
       ...extra,
     });
@@ -107,15 +113,16 @@ export function createWorld(now = Date.now()): World {
 
   // Invoicing · board
   open('invoicing-api', 1287, 'feat: validate e-invoices on receipt', SAM, DAY, [[ALEX, 'pending', true], [AMY, 'pending']], { commentCount: 3 });
-  open('invoicing-worker', 311, 'feat: exponential retry in the tax authority integration', SAM, 2 * DAY, [[ALEX, 'pending'], [AMY, 'approved']], { targetBranch: 'release/2.14' });
-  open('invoicing-web', 642, 'fix: pagination of the invoice list', ALEX, 3 * HOUR, [[SAM, 'waiting-author'], [AMY, 'pending']], { commentCount: 5, mergeState: 'conflicts', conflictCount: 1 });
-  open('invoicing-api', 1279, 'refactor: extract the tax calculation service', ALEX, 4 * DAY, [[SAM, 'waiting-author'], [AMY, 'pending']], { commentCount: 7 });
-  open('invoicing-web', 650, 'feat: filter by tax ID on the dashboard', ALEX, 5 * HOUR, [[SAM, 'pending'], [AMY, 'pending']], { commentCount: 1 });
+  // O voto da Amy, há 3h, não zera o relógio de quem ainda deve a revisão.
+  open('invoicing-worker', 311, 'feat: exponential retry in the tax authority integration', SAM, 2 * DAY + 4 * HOUR, [[ALEX, 'pending'], [AMY, 'approved', false, 3 * HOUR]], { targetBranch: 'release/2.14' });
+  open('invoicing-web', 642, 'fix: pagination of the invoice list', ALEX, 3 * HOUR, [[SAM, 'waiting-author', false, HOUR], [AMY, 'pending']], { commentCount: 5, mergeState: 'conflicts', conflictCount: 1 });
+  open('invoicing-api', 1279, 'refactor: extract the tax calculation service', ALEX, 4 * DAY, [[SAM, 'waiting-author', false, 3 * DAY], [AMY, 'pending']], { commentCount: 7 });
+  open('invoicing-web', 650, 'feat: filter by tax ID on the dashboard', ALEX, 5 * HOUR, [[SAM, 'pending'], [AMY, 'pending']], { commentCount: 1, lastPushAt: ago(2 * HOUR) });
   // Aberto sem nenhum revisor: fica em "Em revisão" com o aviso no card.
   open('invoicing-api', 1290, 'chore: upgrade Spring Boot to 3.4', SAM, DAY + HOUR, []);
-  open('invoicing-infra', 88, 'feat: deploy pipeline for staging', ALEX, 2 * DAY + HOUR, [[SAM, 'approved'], [AMY, 'pending']], { targetBranch: 'main', commentCount: 2 });
-  open('invoicing-api', 1265, 'feat: export the hours report as CSV', ALEX, 3 * DAY, [[SAM, 'approved'], [AMY, 'pending']], { commentCount: 2, mergeState: 'conflicts', conflictCount: 3 });
-  open('invoicing-web', 631, 'fix: ID number mask on sign-up forms', SAM, 6 * DAY, [[AMY, 'approved'], [BEN, 'approved']], { mergeState: 'conflicts', conflictCount: 1 });
+  open('invoicing-infra', 88, 'feat: deploy pipeline for staging', ALEX, 2 * DAY + HOUR, [[SAM, 'approved', false, DAY], [AMY, 'pending']], { targetBranch: 'main', commentCount: 2, lastPushAt: ago(DAY + 2 * HOUR) });
+  open('invoicing-api', 1265, 'feat: export the hours report as CSV', ALEX, 3 * DAY, [[SAM, 'approved'], [AMY, 'pending']], { commentCount: 2, mergeState: 'conflicts', conflictCount: 3, lastPushAt: ago(DAY + 5 * HOUR) });
+  open('invoicing-web', 631, 'fix: ID number mask on sign-up forms', SAM, 6 * DAY, [[AMY, 'approved'], [BEN, 'approved']], { mergeState: 'conflicts', conflictCount: 1, lastPushAt: ago(4 * DAY) });
   open('invoicing-worker', 305, 'feat: invoice reprocessing queue', ALEX, DAY + 2 * HOUR, [[SAM, 'approved'], [AMY, 'approved']], { commentCount: 4 });
   open('invoicing-api', 1293, 'hotfix: timeout when issuing service invoices', ALEX, 2 * HOUR, [[SAM, 'approved'], [AMY, 'approved']], { targetBranch: 'main' });
 

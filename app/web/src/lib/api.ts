@@ -64,6 +64,8 @@ const pullRequestCard = z.object({
   noReviewers: z.boolean(),
   reason: optional(z.enum(['reviewer', 'waiting-author'])),
   requiredReviewer: z.boolean(),
+  waitingSince: z.string(),
+  hasVotes: z.boolean(),
   webUrl: z.string(),
   // Só no board de todos os projetos: de qual projeto é o PR.
   project: optional(projectRef),
