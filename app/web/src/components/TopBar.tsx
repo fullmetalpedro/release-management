@@ -1,8 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, LogOut, Plus } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { api, type Account, type Me, type ProviderId } from '../lib/api';
 import { shortDate } from '../lib/format';
+import { useInbox } from '../lib/inbox';
 import { useSession } from '../lib/session';
 import { AzureDevOpsLogo, GitHubLogo, JiraLogo } from './logos';
 import { OrgMark } from './OrgMark';
@@ -191,15 +192,45 @@ function AccountMenu({ me }: { me: Me }) {
   );
 }
 
+// Aba do topo: sublinhada quando é a tela atual.
+function NavTab({ to, label, count }: { to: string; label: string; count?: number }) {
+  return (
+    <NavLink
+      to={to}
+      end
+      viewTransition
+      className={({ isActive }) =>
+        cx(
+          'flex items-center gap-2 border-b-2 pt-0.5 text-[0.9375rem]',
+          isActive ? 'border-ink font-medium text-ink' : 'border-transparent text-mute hover:text-ink',
+        )
+      }
+    >
+      {label}
+      {count !== undefined && count > 0 && (
+        <span className="rounded-full bg-ink px-1.5 py-px text-[0.6875rem] font-semibold leading-4 text-white">{count}</span>
+      )}
+    </NavLink>
+  );
+}
+
 export function TopBar() {
   const { me } = useSession();
+  // A contagem só aparece depois que a caixa de entrada carregou alguma vez; ela não bloqueia o cabeçalho.
+  const inboxCount = useInbox().data?.items.length;
   return (
     <header
       className="relative z-40 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-line bg-white px-8"
       // O cabeçalho é o mesmo nas duas telas, então fica parado enquanto o conteúdo troca com fade.
       style={{ viewTransitionName: 'top-bar' }}
     >
-      <span className="whitespace-nowrap text-[1.3125rem] font-bold tracking-[-0.3px] text-ink">Release Management</span>
+      <div className="flex h-full items-center gap-9">
+        <span className="whitespace-nowrap text-[1.3125rem] font-bold tracking-[-0.3px] text-ink">Release Management</span>
+        <nav aria-label={t('nav.label')} className="flex h-full items-stretch gap-7">
+          <NavTab to="/" label={t('nav.board')} />
+          <NavTab to="/inbox" label={t('nav.inbox')} count={inboxCount} />
+        </nav>
+      </div>
       <Menu>
         <MenuTrigger aria-label={t('account.menu')} className="rounded-full data-[state=open]:stroke-focus">
           <Avatar name={me.user.name} isMe avatarKey={me.user.avatarKey} size={30} />

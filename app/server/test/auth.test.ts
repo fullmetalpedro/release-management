@@ -332,6 +332,21 @@ describe('conexão por token pessoal', () => {
           : new MemoryWorkTracking(world);
       return { sourceControl: expiringAs(id, active, memory(active.account, new MemorySourceControl(world))), workTracking };
     };
+    registry.sources = (session) =>
+      Object.entries(session.connections ?? {})
+        .filter(([, connection]) => connection.provider !== 'jira')
+        .map(([id, connection]) => ({
+          id,
+          provider: connection.provider as 'azure-devops' | 'github',
+          account: connection.account,
+          expired: !!connection.expiredAt,
+          connection: connection.expiredAt
+            ? undefined
+            : {
+                sourceControl: expiringAs(id, connection, memory(connection.account, new MemorySourceControl(world))),
+                workTracking: new MemoryWorkTracking(world),
+              },
+        }));
     const app = await buildServer({ config, sessions, registry, webDist: '/nao-existe', validatePat });
     // O mesmo envelope que o navegador monta: chave AES embrulhada com RSA-OAEP | IV | { nonce, token } em AES-GCM.
     const encrypt = async (plain: string, reuse?: { nonce: string }) => {
@@ -574,6 +589,27 @@ describe('conexão por token pessoal', () => {
     const profile = await me(cookie);
     expect(profile).toMatchObject({ source: { provider: 'github' }, tracker: null });
     expect(profile.accounts.find((a: { id?: string }) => a.id === 'jira:acme.atlassian.net')).toMatchObject({ expiredAt: expect.any(String) });
+  });
+
+  it('a caixa de entrada junta as organizações; uma recusada vira aviso e fica expirada', async () => {
+    const { app, connect, encrypt, cookieOf, me, rejected } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }, { cookie });
+    rejected.add('acme-gh');
+
+    const response = await app.inject({ method: 'GET', url: '/api/inbox', headers: { cookie } });
+    expect(response.statusCode).toBe(200);
+    const inbox = response.json();
+    expect(inbox.connections.map((c: { account: string; status: string }) => [c.account, c.status])).toEqual([
+      ['contoso', 'ok'],
+      ['acme-gh', 'expired'],
+    ]);
+    expect(inbox.connections[1].expiredAt).toEqual(expect.any(String));
+    expect(inbox.items.length).toBeGreaterThan(0);
+    expect(inbox.items.every((item: { account: string; column: string }) => item.account === 'contoso' && item.column === 'dependsOnMe')).toBe(true);
+    // A recusa marcou a organização, sem derrubar a sessão.
+    const profile = await me(cookie);
+    expect(profile.accounts.find((a: { id?: string }) => a.id === 'github:acme-gh').expiredAt).toEqual(expect.any(String));
   });
 
   it('a sessão só acaba quando nenhuma organização sobra válida', async () => {

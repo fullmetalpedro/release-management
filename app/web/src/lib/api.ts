@@ -91,6 +91,35 @@ const allProjectsBoard = z.object({
 });
 export type AllProjectsBoard = z.infer<typeof allProjectsBoard>;
 
+// O que depende de mim em todas as organizações conectadas. Uma organização expirada ou fora do ar vem em
+// `connections` com o status, e os itens dela ficam de fora.
+const inbox = z.object({
+  syncedAt: z.string(),
+  items: z.array(
+    pullRequestCard.extend({
+      column: z.enum(['dependsOnMe', 'review', 'conflict', 'ready']),
+      project: projectRef,
+      connectionId: z.string(),
+      account: z.string(),
+    }),
+  ),
+  connections: z.array(
+    z.object({
+      id: z.string(),
+      provider: z.enum(['azure-devops', 'github']),
+      account: z.string(),
+      status: z.enum(['ok', 'expired', 'failed']),
+      reason: optional(z.string()),
+      expiredAt: optional(z.string()),
+      count: z.number(),
+      failedProjects: z.array(z.object({ project: z.string(), reason: z.string() })),
+      skippedProjects: z.number(),
+    }),
+  ),
+});
+export type Inbox = z.infer<typeof inbox>;
+export type InboxItem = Inbox['items'][number];
+
 const lanePullRequest = z.object({
   id: z.number(),
   title: z.string(),
@@ -227,6 +256,7 @@ export const api = {
   projects: () => get('/api/projects', z.array(projectView)),
   board: (projectId: string) => get(`/api/projects/${encodeURIComponent(projectId)}/board`, board),
   allProjectsBoard: () => get('/api/board/all', allProjectsBoard),
+  inbox: () => get('/api/inbox', inbox),
   lanes: (projectId: string) =>
     get(`/api/projects/${encodeURIComponent(projectId)}/lanes`, releaseLanes),
   lane: (projectId: string, repositoryId: string) =>

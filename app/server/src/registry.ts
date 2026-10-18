@@ -1,4 +1,4 @@
-import { AzureDevOpsClient, basicFromPat, bearer } from './adapters/azure-devops/client.ts';
+import { AzureDevOpsClient, basicFromPat, bearer, type FetchLike } from './adapters/azure-devops/client.ts';
 import { AzureDevOpsSourceControl } from './adapters/azure-devops/sourceControl.ts';
 import { AzureDevOpsWorkTracking } from './adapters/azure-devops/workTracking.ts';
 import { GitHubSourceControl } from './adapters/github/sourceControl.ts';
@@ -16,6 +16,16 @@ import { msg } from './i18n.ts';
 export interface Connection {
   sourceControl: SourceControl;
   workTracking: WorkTracking;
+}
+
+// Uma organização de onde vêm PRs, para quem agrega todas (a caixa de entrada).
+export interface SourceEntry {
+  id: string;
+  provider: 'azure-devops' | 'github';
+  account: string;
+  // Token já recusado: a entrada aparece só como aviso, sem chamar o provedor.
+  expired: boolean;
+  connection?: Connection;
 }
 
 const REFRESH_MARGIN_MS = 2 * 60 * 1000;
@@ -46,6 +56,25 @@ export class ConnectionRegistry {
     return connection;
   }
 
+  // Todas as organizações da sessão que fornecem PRs, cada uma com os próprios adapters. `fetchImpl` permite que
+  // quem agrega limite as requisições somando todas elas. Sem modo token, a sessão tem uma organização só.
+  sources(session: Session, fetchImpl?: FetchLike): SourceEntry[] {
+    if (session.mode !== 'pat') {
+      const account = session.mode === 'demo' ? 'demo' : this.config.organization;
+      return [{ id: `azure-devops:${account.toLowerCase()}`, provider: 'azure-devops', account, expired: false, connection: this.for(session) }];
+    }
+    return Object.entries(session.connections ?? {})
+      .filter(([, connection]) => connection.provider !== 'jira')
+      .sort(([, a], [, b]) => a.provider.localeCompare(b.provider) || a.account.localeCompare(b.account))
+      .map(([id, connection]) => ({
+        id,
+        provider: connection.provider as SourceEntry['provider'],
+        account: connection.account,
+        expired: !!connection.expiredAt,
+        connection: connection.expiredAt ? undefined : this.sourceConnection(session, id, fetchImpl),
+      }));
+  }
+
   forget(sessionId: string) {
     this.connections.delete(sessionId);
   }
@@ -65,16 +94,20 @@ export class ConnectionRegistry {
     return this.sessions.open(connection.sealedToken);
   }
 
-  // No modo token, a conexão ativa fornece os PRs. As tarefas vêm do próprio Azure DevOps ou,
-  // com o GitHub ativo, do Jira (se estiver conectado).
+  // No modo token, a conexão ativa fornece os PRs.
   private patConnection(session: Session): Connection {
+    return this.sourceConnection(session, session.activeConnection);
+  }
+
+  // Os adapters de uma organização. As tarefas vêm do próprio Azure DevOps ou, com o GitHub, do Jira (se estiver
+  // conectado).
+  private sourceConnection(session: Session, id: string | undefined, fetchImpl?: FetchLike): Connection {
     const connections = session.connections ?? {};
     const { branching } = this.config;
-    const id = session.activeConnection;
     const active = connectionOf(session, id);
 
     if (id && active?.provider === 'azure-devops') {
-      const { sourceControl, workTracking } = this.azureDevOps(active.account, async () => basicFromPat(this.token(session.id, id)));
+      const { sourceControl, workTracking } = this.azureDevOps(active.account, async () => basicFromPat(this.token(session.id, id)), fetchImpl);
       return { sourceControl: expiringAs(id, active, sourceControl), workTracking: expiringAs(id, active, workTracking) };
     }
     if (id && active?.provider === 'github') {
@@ -86,6 +119,7 @@ export class ConnectionRegistry {
           new GitHubSourceControl(
             { owner: active.account, releasePattern: branching.releasePattern, developBranch: branching.developBranch },
             async () => this.token(session.id, id),
+            fetchImpl,
           ),
         ),
         workTracking:
@@ -103,8 +137,8 @@ export class ConnectionRegistry {
     throw new ValidationError(msg('connectSource'));
   }
 
-  private azureDevOps(organization: string, authorization: () => Promise<string>): Connection {
-    const client = new AzureDevOpsClient(organization, authorization);
+  private azureDevOps(organization: string, authorization: () => Promise<string>, fetchImpl?: FetchLike): Connection {
+    const client = new AzureDevOpsClient(organization, authorization, fetchImpl);
     return {
       sourceControl: new AzureDevOpsSourceControl(client, {
         releasePattern: this.config.branching.releasePattern,

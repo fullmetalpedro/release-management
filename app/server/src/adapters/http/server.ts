@@ -18,6 +18,8 @@ import {
 import type { IdentityProvider } from '../../core/ports/identityProvider.ts';
 import { getAllProjectsBoard } from '../../core/usecases/allProjectsBoard.ts';
 import { getBoard } from '../../core/usecases/board.ts';
+import { getInbox, INBOX_CONCURRENCY } from '../../core/usecases/inbox.ts';
+import { createLimiter } from '../../core/concurrency.ts';
 import { listProjects } from '../../core/usecases/projects.ts';
 import { getReleaseDetails } from '../../core/usecases/releaseDetails.ts';
 import { createRelease, getReleaseLane, getReleaseLanes } from '../../core/usecases/releaseLane.ts';
@@ -527,6 +529,38 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     api.get('/projects', async (request) => listProjects(connection(request), config.projects));
 
     // Fan-out pelos projetos da conexão; um projeto que falha vira aviso, e o motivo sai no idioma de quem pediu.
+    // Tudo o que depende do usuário, em todas as organizações conectadas e em todos os projetos de cada uma.
+    api.get('/inbox', async (request) => {
+      const session = sessionOf(request)!;
+      const limit = createLimiter(INBOX_CONCURRENCY);
+      const limitedFetch = (input: string, init?: RequestInit) => limit(() => fetch(input, init));
+      const sources = registry.sources(session, limitedFetch).map(({ connection: adapters, ...source }) => ({
+        ...source,
+        sourceControl: adapters?.sourceControl,
+      }));
+      const inbox = await getInbox(sources, {
+        allowed: config.projects,
+        reasonOf: (error) => {
+          if (error instanceof LocalizedError) return error.messageIn(localeOf(request));
+          request.log.error(error);
+          return say(request, 'internalError');
+        },
+        onExpired: (id) => {
+          sessions.update(session.id, (stored) => {
+            const expired = connectionOf(stored, id);
+            if (expired && !expired.expiredAt) expired.expiredAt = Date.now();
+          });
+          registry.forget(session.id);
+        },
+      });
+      const stored = sessionOf(request);
+      for (const connection of inbox.connections) {
+        const expiredAt = connectionOf(stored, connection.id)?.expiredAt;
+        if (connection.status === 'expired' && expiredAt) connection.expiredAt = new Date(expiredAt).toISOString();
+      }
+      return inbox;
+    });
+
     api.get('/board/all', async (request) =>
       getAllProjectsBoard(
         {
