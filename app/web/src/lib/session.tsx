@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'r
 import { Navigate, useLocation } from 'react-router-dom';
 import { api, ApiError, type Me, type ProjectView } from './api';
 import { useStoredState } from './format';
+import { autoSync, useSyncInterval } from './sync';
 
 interface SessionContextValue {
   me: Me;
@@ -24,13 +25,13 @@ export function RequireSession({ children }: { children: ReactNode }) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const [projectId, setProjectId] = useStoredState<string | null>('rm.project', null);
+  const [syncInterval] = useSyncInterval();
 
   const projects = useQuery({
     queryKey: ['projects'],
     queryFn: api.projects,
     enabled: me.isSuccess,
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
+    ...autoSync(syncInterval, 60_000),
   });
 
   useEffect(

@@ -27,6 +27,18 @@ export const en: Catalog = {
     badResponse: "The server sent an unexpected response. Try refreshing.",
     tokenPrep: "Couldn't prepare the token to be sent",
   },
+  sync: {
+    title: 'AUTO-REFRESH',
+    off: 'Off',
+    every_one: 'Every {{count}} min',
+    every_other: 'Every {{count}} min',
+    default: 'default',
+    pauseNote: "Pauses while the tab is in the background. When you come back, it syncs right away if the interval has passed.",
+    nextIn_one: 'next in {{count}} min',
+    nextIn_other: 'next in {{count}} min',
+    nextSoon: 'next in a moment',
+    autoOff: 'Auto-refresh off',
+  },
   time: {
     justNow: 'just now',
     minutesAgo: '{{count}} min ago',

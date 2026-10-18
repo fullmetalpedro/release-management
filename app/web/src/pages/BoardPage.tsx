@@ -24,8 +24,9 @@ import {
 } from '../components/toolbar';
 import { TopBar } from '../components/TopBar';
 import { api, ApiError, type BoardColumnId, type PullRequestCard } from '../lib/api';
-import { elapsedLabel, useNow, useStoredState } from '../lib/format';
-import { LANE_STALE_MS, laneKey, SYNC_INTERVAL_MS, useAllLanes } from '../lib/lanes';
+import { useNow, useStoredState } from '../lib/format';
+import { LANE_STALE_MS, laneKey, useAllLanes } from '../lib/lanes';
+import { autoSync, useSyncInterval } from '../lib/sync';
 import { useSession } from '../lib/session';
 import { t } from '../lib/i18n';
 
@@ -64,6 +65,7 @@ export function BoardPage() {
   const [reviewerScope, setReviewerScope] = useStoredState<ReviewerScope>('rm.reviewerScope', 'all', isReviewerScope);
   const [colorChoices, setColorChoices] = useStoredState<Record<string, Record<string, string>>>('rm.repoColors', {}, isColorChoice);
   const [customColors, setCustomColors] = useStoredState<string[]>('rm.customColors', [], isColorList);
+  const [syncInterval, setSyncInterval] = useSyncInterval();
   const repositoryColors = (projectId && colorChoices[projectId]) || {};
   const setRepositoryColor = (repositoryId: string, hex: string | null) => {
     if (!projectId) return;
@@ -88,7 +90,7 @@ export function BoardPage() {
     queryKey: ['board', projectId],
     queryFn: () => api.board(projectId!),
     enabled: !!projectId,
-    refetchInterval: SYNC_INTERVAL_MS,
+    ...autoSync(syncInterval, 30_000),
     retry: false,
   });
 
@@ -370,7 +372,10 @@ export function BoardPage() {
           <SyncControls
             syncing={syncing}
             failed={board.isError || mergedFailed || releaseFailed}
-            lastSync={board.data && elapsedLabel(board.data.syncedAt, now)}
+            syncedAt={board.data?.syncedAt}
+            updatedAt={board.dataUpdatedAt}
+            interval={syncInterval}
+            onIntervalChange={setSyncInterval}
             onRefresh={refresh}
           />
         </div>

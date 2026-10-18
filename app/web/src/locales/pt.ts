@@ -25,6 +25,18 @@ export const pt = {
     badResponse: "O servidor respondeu algo inesperado. Tente atualizar.",
     tokenPrep: 'Não foi possível preparar o envio do token',
   },
+  sync: {
+    title: 'ATUALIZAR AUTOMATICAMENTE',
+    off: 'Desligado',
+    every_one: 'A cada {{count}} min',
+    every_other: 'A cada {{count}} min',
+    default: 'padrão',
+    pauseNote: 'Pausa com a aba em segundo plano. Ao voltar, sincroniza na hora se o intervalo já tiver passado.',
+    nextIn_one: 'próxima em {{count}} min',
+    nextIn_other: 'próxima em {{count}} min',
+    nextSoon: 'próxima em instantes',
+    autoOff: 'Atualização automática desligada',
+  },
   time: {
     justNow: 'agora',
     minutesAgo: 'há {{count}} min',

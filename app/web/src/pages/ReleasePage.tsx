@@ -28,8 +28,10 @@ import {
   type WorkItemStateCategory,
   type WorkItemSummary,
 } from '../lib/api';
-import { authorLabel, elapsedLabel, releaseMeta, shortDate, useNow } from '../lib/format';
-import { LANE_STALE_MS, releaseKey, SYNC_INTERVAL_MS, useAllLanes } from '../lib/lanes';
+import { SyncIntervalMenu, SyncStatus } from '../components/toolbar';
+import { authorLabel, releaseMeta, shortDate, useNow } from '../lib/format';
+import { LANE_STALE_MS, releaseKey, useAllLanes } from '../lib/lanes';
+import { autoSync, useSyncInterval } from '../lib/sync';
 import { useSession } from '../lib/session';
 import { t } from '../lib/i18n';
 import { rem } from '../lib/units';
@@ -284,6 +286,7 @@ export function ReleasePage() {
   const now = useNow();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const [syncInterval, setSyncInterval] = useSyncInterval();
   const [collapsed, setCollapsed] = useState<number[]>([]);
   const [freshLink, setFreshLink] = useState<{ pullRequestId: number; workItemId: number } | null>(null);
 
@@ -303,9 +306,8 @@ export function ReleasePage() {
     queryKey: releaseKey(projectId, repositoryId, branch),
     queryFn: () => api.release(projectId!, repositoryId!, branch),
     enabled: !!projectId && !!repositoryId,
-    staleTime: LANE_STALE_MS,
     gcTime: 3 * LANE_STALE_MS,
-    refetchInterval: SYNC_INTERVAL_MS,
+    ...autoSync(syncInterval, LANE_STALE_MS),
     retry: false,
   });
 
@@ -402,28 +404,32 @@ export function ReleasePage() {
             <span className="text-[0.8125rem] text-mute">
               {(release && releaseMeta(release, now)) || ' '}
             </span>
-            <button
-              type="button"
-              onClick={() => {
-                if (board.isError) void board.refetch();
-                void details.refetch();
-              }}
-              disabled={details.isFetching}
-              className="stroke flex items-center gap-1.5 rounded-md bg-white px-2.5 py-[0.3125rem] hover-surface"
-            >
-              <RefreshCw size={rem(13)} className={cx('text-ink-2', details.isFetching && 'animate-spin')} />
-              <span className="text-[0.78125rem] font-semibold text-ink">{details.isFetching ? t('common.syncing') : t('common.refresh')}</span>
-            </button>
-            <span
-              className={cx('text-xs', details.isError || board.isError ? 'text-[#DC2626]' : 'text-faint')}
-              title={(details.isError || board.isError) && data ? t('common.lastSync', { when: elapsedLabel(data.syncedAt, now) }) : undefined}
-            >
-              {details.isError || board.isError
-                ? t('common.syncFailed')
-                : data
-                  ? t('common.synced', { when: elapsedLabel(data.syncedAt, now) })
-                  : ''}
-            </span>
+            <div className="flex">
+              <button
+                type="button"
+                onClick={() => {
+                  if (board.isError) void board.refetch();
+                  void details.refetch();
+                }}
+                disabled={details.isFetching}
+                className="stroke flex items-center gap-1.5 rounded-l-md bg-white px-2.5 py-[0.3125rem] hover-surface"
+              >
+                <RefreshCw size={rem(13)} className={cx('text-ink-2', details.isFetching && 'animate-spin')} />
+                <span className="text-[0.78125rem] font-semibold text-ink">{details.isFetching ? t('common.syncing') : t('common.refresh')}</span>
+              </button>
+              <SyncIntervalMenu
+                value={syncInterval}
+                onChange={setSyncInterval}
+                className="stroke -ml-px flex items-center rounded-r-md bg-white px-1.5 hover-surface data-[state=open]:stroke-focus"
+                iconClassName="text-ink-2"
+              />
+            </div>
+            <SyncStatus
+              failed={details.isError || board.isError}
+              syncedAt={data?.syncedAt}
+              updatedAt={details.dataUpdatedAt}
+              interval={syncInterval}
+            />
           </div>
         </div>
 
