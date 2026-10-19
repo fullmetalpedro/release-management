@@ -92,6 +92,7 @@ export const DEFAULT_SESSION_MAX_AGE_DAYS = 30;
 const RENEW_INTERVAL_MS = 60 * 60 * 1000;
 // Teto de sessões vivas: acima dele saem as mais antigas, para a memória (e o arquivo) não crescerem sem limite.
 const MAX_SESSIONS = 10_000;
+const SWEEP_INTERVAL_MS = 60_000;
 
 const lastSeen = (session: Session) => session.lastSeenAt ?? session.createdAt;
 
@@ -99,6 +100,7 @@ const lastSeen = (session: Session) => session.lastSeenAt ?? session.createdAt;
 export class SessionStore {
   private readonly sessions = new Map<string, Session>();
   private readonly key: Buffer;
+  private lastSweep = 0;
   // Validade de uma sessão sem uso; o cookie usa o mesmo valor.
   readonly maxAgeMs: number;
 
@@ -165,9 +167,12 @@ export class SessionStore {
     return now - lastSeen(session) > this.maxAgeMs;
   }
 
-  // Sessões vencidas que ninguém voltou a usar não ficam guardadas para sempre.
-  private dropExpired() {
+  // Sessões vencidas que ninguém voltou a usar não ficam guardadas para sempre. A varredura passa por todas as
+  // sessões, então roda no máximo uma vez por minuto: criar sessões em rajada não vira custo quadrático.
+  private dropExpired(force = false) {
     const now = Date.now();
+    if (!force && now - this.lastSweep < SWEEP_INTERVAL_MS) return;
+    this.lastSweep = now;
     for (const [id, session] of this.sessions) if (this.isExpired(session, now)) this.sessions.delete(id);
   }
 
