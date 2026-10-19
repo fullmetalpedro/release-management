@@ -32,6 +32,7 @@ import {
   MenuTrigger,
 } from './ui';
 import { elapsedLabel, useNow } from '../lib/format';
+import type { NotifyPermission } from '../lib/newPrs';
 import { t } from '../lib/i18n';
 import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS, type SyncInterval } from '../lib/sync';
 import { rem } from '../lib/units';
@@ -296,6 +297,47 @@ export function SyncIntervalMenu({
   );
 }
 
+// No menu de sincronização: aviso do navegador quando chega PR que depende de mim (#20).
+// Ligar pede a permissão; negada no navegador, a opção fica travada e diz onde liberar.
+export function NewPrNotifyOption({
+  checked,
+  permission,
+  onChange,
+}: {
+  checked: boolean;
+  permission: NotifyPermission;
+  onChange: (checked: boolean) => void;
+}) {
+  const blocked = permission === 'denied' || permission === 'unsupported';
+  const hint =
+    permission === 'unsupported'
+      ? t('newPrs.notifyUnsupported')
+      : permission === 'denied'
+        ? t('newPrs.notifyDenied')
+        : t('newPrs.notifyHint');
+  return (
+    <>
+      <MenuCheckboxItem
+        checked={checked}
+        disabled={blocked}
+        onCheckedChange={(next) => onChange(next === true)}
+        // Marcar não fecha o menu: o pedido de permissão aparece por cima dele.
+        onSelect={(event) => event.preventDefault()}
+        className={cx('flex items-start gap-2.5 rounded-md px-2.5 py-2', MENU_ITEM_LIGHT, blocked && 'opacity-60')}
+      >
+        <span className="pt-px">
+          <CheckMark checked={checked} />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-[0.8125rem] font-medium text-ink">{t('newPrs.notify')}</span>
+          <span className="text-xs leading-[1.4] text-faint">{hint}</span>
+        </span>
+      </MenuCheckboxItem>
+      <div className="h-px shrink-0 bg-line-soft" />
+    </>
+  );
+}
+
 // Anel que se completa até a próxima sincronização automática.
 function SyncRing({ progress }: { progress: number }) {
   return (
@@ -368,6 +410,7 @@ export function SyncControls({
   interval,
   onIntervalChange,
   onRefresh,
+  menuExtra,
 }: {
   syncing: boolean;
   failed: boolean;
@@ -376,6 +419,7 @@ export function SyncControls({
   interval: SyncInterval;
   onIntervalChange: (value: SyncInterval) => void;
   onRefresh: () => void;
+  menuExtra?: ReactNode;
 }) {
   return (
     <>
@@ -403,6 +447,7 @@ export function SyncControls({
         <SyncIntervalMenu
           value={interval}
           onChange={onIntervalChange}
+          extra={menuExtra}
           className="hover-primary flex items-center rounded-r-lg border-l border-white/20 bg-ink px-2 text-white data-[state=open]:bg-[#1E293B]"
         />
       </div>

@@ -20,6 +20,7 @@ import {
   AuthorIcon,
   ColumnsDropdown,
   FilterSelect,
+  NewPrNotifyOption,
   ProjectSwitcher,
   SearchBox,
   SyncControls,
@@ -30,6 +31,7 @@ import { TriangleAlert } from 'lucide-react';
 import { api, ApiError, type AllProjectsBoard, type Board, type BoardColumnId, type PullRequestCard } from '../lib/api';
 import { useNow, useStoredState } from '../lib/format';
 import { LANE_STALE_MS, laneKey, useAllLanes } from '../lib/lanes';
+import { showBrowserNotification, useNewPrNotifications, useNewPrs } from '../lib/newPrs';
 import { autoSync, useSyncInterval } from '../lib/sync';
 import { ALL_PROJECTS, useSession } from '../lib/session';
 import { t } from '../lib/i18n';
@@ -265,14 +267,39 @@ export function BoardPage() {
     return result;
   }, [boardData, authorFilter, repositoryFilter, targetFilter, search, reviewerScope, sortOrder]);
 
-  const myCards = (boardData?.columns.dependsOnMe ?? []).filter(
-    (pr) => reviewerScope === 'all' || pr.reason !== 'reviewer' || pr.requiredReviewer,
-  );
+  const countsForMe = (pr: PullRequestCard) => reviewerScope === 'all' || pr.reason !== 'reviewer' || pr.requiredReviewer;
+  const myCards = (boardData?.columns.dependsOnMe ?? []).filter(countsForMe);
   const dependsOnMe = myCards.length;
   // PRs parados (na faixa vermelha) nas colunas de espera, como o resto do subtítulo: sem os filtros da toolbar.
   const stale = WAITING_COLUMNS.flatMap((id) => (id === 'dependsOnMe' ? myCards : (boardData?.columns[id] ?? []))).filter(
     (pr) => waitingBand(pr.waitingSince, now) === 'stale',
   ).length;
+
+  // PR novo em "Depende de mim" depois de um sync: toast, badge Novo e, com o opt-in, aviso do navegador.
+  const notifications = useNewPrNotifications();
+  const showNewPrs = () => {
+    if (hidden.includes('dependsOnMe')) setHidden(hidden.filter((id) => id !== 'dependsOnMe'));
+    // Depois de a coluna voltar a aparecer.
+    requestAnimationFrame(() =>
+      boardRef.current?.querySelector('[data-fresh]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' }),
+    );
+  };
+  const { fresh, opened } = useNewPrs({
+    me,
+    projectId,
+    board: boardData,
+    updatedAt: board.dataUpdatedAt,
+    counts: countsForMe,
+    waiting: dependsOnMe,
+    notify: notifications.enabled,
+    onNew: (prs, notifyBrowser) => {
+      const title = t('newPrs.title', { count: prs.length });
+      const items = prs.slice(0, 3).map((pr) => `#${pr.id} ${pr.title}`);
+      if (prs.length > 3) items.push(t('newPrs.more', { count: prs.length - 3 }));
+      toast.show({ kind: 'info', title, items, action: { label: t('newPrs.viewOnBoard'), onClick: showNewPrs } });
+      if (notifyBrowser) showBrowserNotification(title, items.join('\n'), showNewPrs);
+    },
+  });
   const optionalHidden =
     reviewerScope === 'required' &&
     (boardData?.columns.dependsOnMe ?? []).some((pr) => pr.reason === 'reviewer' && !pr.requiredReviewer);
@@ -357,6 +384,8 @@ export function BoardPage() {
         id={column.id}
         cards={filtered[column.id]}
         repositoryColors={repositoryColors}
+        fresh={column.id === 'dependsOnMe' ? fresh : undefined}
+        onOpen={column.id === 'dependsOnMe' ? opened : undefined}
         loading={loading}
         emptyState={!!boardData && !isFiltered && !(column.id === 'dependsOnMe' && optionalHidden)}
         filtered={isFiltered || (column.id === 'dependsOnMe' && optionalHidden)}
@@ -467,6 +496,13 @@ export function BoardPage() {
             interval={syncInterval}
             onIntervalChange={setSyncInterval}
             onRefresh={refresh}
+            menuExtra={
+              <NewPrNotifyOption
+                checked={notifications.enabled}
+                permission={notifications.permission}
+                onChange={(next) => void notifications.toggle(next)}
+              />
+            }
           />
         </div>
       </div>

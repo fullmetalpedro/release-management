@@ -1,13 +1,15 @@
-import { CircleCheck, CircleX, X } from 'lucide-react';
+import { BellRing, CircleCheck, CircleX, X } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { toast as sonner, Toaster } from 'sonner';
 import { t } from '../lib/i18n';
 import { rem } from '../lib/units';
 
 export interface ToastInput {
-  kind: 'success' | 'error';
+  kind: 'success' | 'error' | 'info';
   title: string;
   description?: string;
+  // Lista curta abaixo do título, como os PRs que acabaram de chegar.
+  items?: string[];
   action?: { label: string; onClick: () => void };
 }
 
@@ -27,12 +29,23 @@ function ToastCard({ id, toast }: { id: string | number; toast: ToastInput }) {
     >
       {toast.kind === 'success' ? (
         <CircleCheck size={rem(18)} className="shrink-0 text-[#4ADE80]" />
+      ) : toast.kind === 'info' ? (
+        <BellRing size={rem(18)} className="shrink-0 text-[#FBBF24]" />
       ) : (
         <CircleX size={rem(18)} className="shrink-0 text-[#F87171]" />
       )}
       <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
         <p className="text-[0.84375rem] font-semibold text-white">{toast.title}</p>
         {toast.description && <p className="text-[0.78125rem] leading-[1.4] text-[#CBD5E1]">{toast.description}</p>}
+        {toast.items && (
+          <ul className="flex w-full flex-col gap-0.5">
+            {toast.items.map((item) => (
+              <li key={item} className="truncate text-[0.78125rem] leading-[1.4] text-[#CBD5E1]">
+                {item}
+              </li>
+            ))}
+          </ul>
+        )}
         {toast.action && (
           <button
             type="button"
