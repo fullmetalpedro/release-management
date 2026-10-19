@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'r
 import { Navigate, useLocation } from 'react-router-dom';
 import { api, ApiError, type Me, type ProjectView } from './api';
 import { useStoredState } from './format';
+import { autoSync, useSyncInterval } from './sync';
 
 // Valor guardado em rm.project quando o board mostra todos os projetos da organização.
 export const ALL_PROJECTS = '*';
@@ -33,13 +34,13 @@ export function RequireSession({ children }: { children: ReactNode }) {
   // No modo token o projeto escolhido por último fica guardado por organização: trocar de organização restaura o dela.
   const connectionId = me.data?.accounts.find((account) => account.active)?.id;
   const [projectId, setProjectId] = useStoredState<string | null>(connectionId ? `rm.project:${connectionId}` : 'rm.project', null);
+  const [syncInterval] = useSyncInterval();
 
   const projects = useQuery({
     queryKey: ['projects', connectionId],
     queryFn: api.projects,
     enabled: me.isSuccess,
-    staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
+    ...autoSync(syncInterval, 60_000),
   });
 
   // Uma escrita recusada por token só de leitura: a sessão recarrega para a interface desabilitar a ação.

@@ -28,6 +28,18 @@ export const fr: Catalog = {
     badResponse: "Le serveur a renvoyé une réponse inattendue. Essayez d’actualiser.",
     tokenPrep: "Impossible de préparer l'envoi du jeton",
   },
+  sync: {
+    title: 'ACTUALISATION AUTOMATIQUE',
+    off: 'Désactivée',
+    every_one: 'Toutes les {{count}} min',
+    every_other: 'Toutes les {{count}} min',
+    default: 'par défaut',
+    pauseNote: "En pause quand l'onglet est en arrière-plan. À votre retour, la synchronisation est immédiate si l'intervalle est écoulé.",
+    nextIn_one: 'prochaine dans {{count}} min',
+    nextIn_other: 'prochaine dans {{count}} min',
+    nextSoon: 'prochaine dans un instant',
+    autoOff: 'Actualisation automatique désactivée',
+  },
   time: {
     justNow: "à l'instant",
     minutesAgo: 'il y a {{count}} min',

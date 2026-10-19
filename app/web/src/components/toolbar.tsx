@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { DropdownMenu } from 'radix-ui';
+import type { ReactNode } from 'react';
 import type { ProjectView } from '../lib/api';
 import { ALL_PROJECTS } from '../lib/session';
 import { COLUMNS, type ColumnId } from './board';
@@ -30,7 +31,9 @@ import {
   MenuRadioGroup,
   MenuTrigger,
 } from './ui';
+import { elapsedLabel, useNow } from '../lib/format';
 import { t } from '../lib/i18n';
+import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS, type SyncInterval } from '../lib/sync';
 import { rem } from '../lib/units';
 
 export function ProjectSwitcher({
@@ -256,48 +259,154 @@ export function SearchBox({ value, onChange }: { value: string; onChange: (value
   );
 }
 
+// Menu "Atualizar automaticamente": o chevron ao lado do Atualizar, no board e na release.
+export function SyncIntervalMenu({
+  value,
+  onChange,
+  className,
+  iconClassName,
+  extra,
+}: {
+  value: SyncInterval;
+  onChange: (value: SyncInterval) => void;
+  className: string;
+  iconClassName?: string;
+  // Espaço para outras opções de sincronização, como o aviso de PR novo que depende de mim (#20).
+  extra?: ReactNode;
+}) {
+  return (
+    <Menu>
+      <MenuTrigger className={className} aria-label={t('sync.title')} title={t('sync.title')}>
+        <ChevronDown size={rem(14)} className={cx('transition-transform group-data-[state=open]:rotate-180', iconClassName)} />
+      </MenuTrigger>
+      <MenuContent align="end" width={260} title={t('sync.title')}>
+        <MenuRadioGroup value={String(value)} onValueChange={(next) => onChange(Number(next) as SyncInterval)}>
+          {SYNC_INTERVALS.map((minutes) => (
+            <MenuOption key={minutes} value={String(minutes)} selected={minutes === value}>
+              {minutes === 0 ? t('sync.off') : t('sync.every', { count: minutes })}
+              {minutes === DEFAULT_SYNC_INTERVAL && <span className="text-faint"> · {t('sync.default')}</span>}
+            </MenuOption>
+          ))}
+        </MenuRadioGroup>
+        <div className="h-px shrink-0 bg-line-soft" />
+        {extra}
+        <p className="px-2.5 py-2 text-xs leading-[1.45] text-faint">{t('sync.pauseNote')}</p>
+      </MenuContent>
+    </Menu>
+  );
+}
+
+// Anel que se completa até a próxima sincronização automática.
+function SyncRing({ progress }: { progress: number }) {
+  return (
+    <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0 -rotate-90" aria-hidden>
+      <circle cx="6" cy="6" r="4.5" fill="none" strokeWidth="2" className="stroke-line" />
+      <circle
+        cx="6"
+        cy="6"
+        r="4.5"
+        fill="none"
+        strokeWidth="2"
+        pathLength={100}
+        strokeDasharray="100"
+        strokeDashoffset={100 * (1 - progress)}
+        className="stroke-[#0F766E] transition-[stroke-dashoffset] duration-1000 ease-linear"
+      />
+    </svg>
+  );
+}
+
+// Duas linhas: há quanto tempo sincronizou e quando sincroniza de novo.
+// `syncedAt` é a hora do servidor; `updatedAt`, quando esta aba recebeu o dado, que é de onde o intervalo conta.
+export function SyncStatus({
+  failed,
+  syncedAt,
+  updatedAt,
+  interval,
+}: {
+  failed: boolean;
+  syncedAt?: string;
+  updatedAt: number;
+  interval: SyncInterval;
+}) {
+  // Atualiza a cada poucos segundos só aqui dentro, para o anel andar sem redesenhar a página.
+  const now = useNow(5_000);
+  const lastSync = syncedAt && elapsedLabel(syncedAt, now);
+  // Durante a sincronização só o botão muda; o status continua mostrando o último resultado.
+  const status = failed ? t('common.syncFailed') : lastSync ? t('common.synced', { when: lastSync }) : '';
+  const ms = interval * 60_000;
+  const remaining = updatedAt + ms - now;
+  return (
+    <span className="flex flex-col gap-0.5 whitespace-nowrap text-xs" aria-live="polite">
+      <span
+        className={failed ? 'text-[#DC2626]' : 'text-faint'}
+        title={failed && lastSync ? t('common.lastSync', { when: lastSync }) : undefined}
+      >
+        {status || ' '}
+      </span>
+      {updatedAt > 0 && (
+        <span className="flex items-center gap-1.5 text-faint">
+          {interval === 0 ? (
+            t('sync.autoOff')
+          ) : (
+            <>
+              <SyncRing progress={Math.min(1, Math.max(0, 1 - remaining / ms))} />
+              {remaining < 60_000 ? t('sync.nextSoon') : t('sync.nextIn', { count: Math.ceil(remaining / 60_000) })}
+            </>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function SyncControls({
   syncing,
   failed,
-  lastSync,
+  syncedAt,
+  updatedAt,
+  interval,
+  onIntervalChange,
   onRefresh,
 }: {
   syncing: boolean;
   failed: boolean;
-  lastSync?: string;
+  syncedAt?: string;
+  updatedAt: number;
+  interval: SyncInterval;
+  onIntervalChange: (value: SyncInterval) => void;
   onRefresh: () => void;
 }) {
-  // Durante a sincronização só o botão muda; o status continua mostrando o último resultado.
-  const status = failed ? t('common.syncFailed') : lastSync ? t('common.synced', { when: lastSync }) : '';
   return (
     <>
-      <button
-        type="button"
-        onClick={onRefresh}
-        disabled={syncing}
-        className={cx(
-          'grid shrink-0 rounded-lg px-3.5 py-2 text-[0.8125rem] font-semibold text-white',
-          // Sincronizando, o botão fica na cor do hover.
-          syncing ? 'bg-[#1E293B]' : 'hover-primary bg-ink',
-        )}
-      >
-        {/* Os dois rótulos ocupam o mesmo lugar: o botão não muda de largura a cada sincronização. */}
-        <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-1.5', syncing && 'invisible')}>
-          <RefreshCw size={rem(14)} />
-          {t('common.refresh')}
-        </span>
-        <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-1.5', !syncing && 'invisible')}>
-          <RefreshCw size={rem(14)} className={cx(syncing && 'animate-spin')} />
-          {t('common.syncing')}
-        </span>
-      </button>
-      <span
-        className={cx('whitespace-nowrap text-xs', failed ? 'text-[#DC2626]' : 'text-faint')}
-        title={failed && lastSync ? t('common.lastSync', { when: lastSync }) : undefined}
-        aria-live="polite"
-      >
-        {status}
-      </span>
+      <div className="flex shrink-0">
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={syncing}
+          className={cx(
+            'grid rounded-l-lg px-3.5 py-2 text-[0.8125rem] font-semibold text-white',
+            // Sincronizando, o botão fica na cor do hover.
+            syncing ? 'bg-[#1E293B]' : 'hover-primary bg-ink',
+          )}
+        >
+          {/* Os dois rótulos ocupam o mesmo lugar: o botão não muda de largura a cada sincronização. */}
+          <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-1.5', syncing && 'invisible')}>
+            <RefreshCw size={rem(14)} />
+            {t('common.refresh')}
+          </span>
+          <span className={cx('col-start-1 row-start-1 flex items-center justify-center gap-1.5', !syncing && 'invisible')}>
+            <RefreshCw size={rem(14)} className={cx(syncing && 'animate-spin')} />
+            {t('common.syncing')}
+          </span>
+        </button>
+        <SyncIntervalMenu
+          value={interval}
+          onChange={onIntervalChange}
+          className="hover-primary flex items-center rounded-r-lg border-l border-white/20 bg-ink px-2 text-white data-[state=open]:bg-[#1E293B]"
+        />
+      </div>
+      <SyncStatus failed={failed} syncedAt={syncedAt} updatedAt={updatedAt} interval={interval} />
     </>
   );
 }

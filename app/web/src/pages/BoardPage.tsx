@@ -28,8 +28,9 @@ import {
 import { TopBar } from '../components/TopBar';
 import { TriangleAlert } from 'lucide-react';
 import { api, ApiError, type AllProjectsBoard, type Board, type BoardColumnId, type PullRequestCard } from '../lib/api';
-import { elapsedLabel, useNow, useStoredState } from '../lib/format';
-import { LANE_STALE_MS, laneKey, SYNC_INTERVAL_MS, useAllLanes } from '../lib/lanes';
+import { useNow, useStoredState } from '../lib/format';
+import { LANE_STALE_MS, laneKey, useAllLanes } from '../lib/lanes';
+import { autoSync, useSyncInterval } from '../lib/sync';
 import { ALL_PROJECTS, useSession } from '../lib/session';
 import { t } from '../lib/i18n';
 import { rem } from '../lib/units';
@@ -94,6 +95,7 @@ export function BoardPage() {
   const [sortOrder, setSortOrder] = useStoredState<SortOrder>('rm.sortOrder', 'provider', isSortOrder);
   const [colorChoices, setColorChoices] = useStoredState<Record<string, Record<string, string>>>('rm.repoColors', {}, isColorChoice);
   const [customColors, setCustomColors] = useStoredState<string[]>('rm.customColors', [], isColorList);
+  const [syncInterval, setSyncInterval] = useSyncInterval();
   const [createState, setCreateState] = useState<CreateState>({ status: 'idle' });
   const [justCreated, setJustCreated] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -112,14 +114,14 @@ export function BoardPage() {
     queryKey: ['board', projectId],
     queryFn: () => api.board(projectId!),
     enabled: !!projectId,
-    refetchInterval: SYNC_INTERVAL_MS,
+    ...autoSync(syncInterval, 30_000),
     retry: false,
   });
   const allBoard = useQuery({
     queryKey: ['board', ALL_PROJECTS],
     queryFn: api.allProjectsBoard,
     enabled: allProjects,
-    refetchInterval: SYNC_INTERVAL_MS,
+    ...autoSync(syncInterval, 30_000),
     retry: false,
   });
   const board = allProjects ? allBoard : singleBoard;
@@ -460,7 +462,10 @@ export function BoardPage() {
           <SyncControls
             syncing={syncing}
             failed={board.isError || mergedFailed || releaseFailed}
-            lastSync={boardData && elapsedLabel(boardData.syncedAt, now)}
+            syncedAt={boardData?.syncedAt}
+            updatedAt={board.dataUpdatedAt}
+            interval={syncInterval}
+            onIntervalChange={setSyncInterval}
             onRefresh={refresh}
           />
         </div>
