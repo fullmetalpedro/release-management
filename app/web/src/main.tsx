@@ -9,6 +9,7 @@ import { RequireSession } from './lib/session';
 import { BoardPage } from './pages/BoardPage';
 import { LoginPage } from './pages/LoginPage';
 import { ReleasePage } from './pages/ReleasePage';
+import { InboxPage } from './pages/InboxPage';
 import { LocaleProvider } from './lib/i18n';
 
 const queryClient = new QueryClient({
@@ -20,6 +21,7 @@ const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/', element: <RequireSession><BoardPage /></RequireSession> },
   { path: '/release', element: <RequireSession><ReleasePage /></RequireSession> },
+  { path: '/inbox', element: <RequireSession><InboxPage /></RequireSession> },
   { path: '*', element: <Navigate to="/" replace /> },
 ]);
 

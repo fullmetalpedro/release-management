@@ -183,6 +183,26 @@ const CATALOG = {
     en: "This platform isn't connected.",
     fr: "Cette plateforme n'est pas connectée.",
   },
+  connectionNotFound: {
+    pt: 'Essa organização não está conectada.',
+    en: "This organization isn't connected.",
+    fr: "Cette organisation n'est pas connectée.",
+  },
+  readOnlyRelease: {
+    pt: 'O token de {account} é só de leitura: criar releases precisa de permissão de escrita no código.',
+    en: 'The token for {account} is read-only: creating releases needs write access to code.',
+    fr: "Le jeton de {account} est en lecture seule : créer des releases demande un accès en écriture au code.",
+  },
+  readOnlyLink: {
+    pt: 'O token de {account} é só de leitura: vincular PRs precisa de permissão de escrita nas tarefas.',
+    en: 'The token for {account} is read-only: linking pull requests needs write access to work items.',
+    fr: "Le jeton de {account} est en lecture seule : lier des pull requests demande un accès en écriture aux éléments de travail.",
+  },
+  connectionExpired: {
+    pt: 'O token de {account} expirou. Reconecte essa organização para continuar.',
+    en: 'The token for {account} has expired. Reconnect this organization to continue.',
+    fr: 'Le jeton de {account} a expiré. Reconnectez cette organisation pour continuer.',
+  },
   noPhoto: {
     pt: 'Sem foto',
     en: 'No photo',

@@ -1,4 +1,4 @@
-import { GitBranch, GitBranchPlus, GitMerge, LoaderCircle, Maximize2 } from 'lucide-react';
+import { GitBranch, GitBranchPlus, GitMerge, LoaderCircle, Lock, Maximize2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { LanePullRequest, ReleaseLane } from '../lib/api';
@@ -42,6 +42,7 @@ export function MergedColumn({
   state,
   onCreate,
   onSelectionChange,
+  readOnly,
 }: {
   repositories: Repo[];
   repositoryId: string | undefined;
@@ -53,6 +54,8 @@ export function MergedColumn({
   state: CreateState;
   onCreate: (name: string, pullRequestIds: number[]) => void;
   onSelectionChange: () => void;
+  // O token desta organização é só de leitura: dá para ver e selecionar, mas não criar a release.
+  readOnly?: boolean;
 }) {
   const [selected, setSelected] = useState<number[]>([]);
   const [branch, setBranch] = useState('');
@@ -74,7 +77,7 @@ export function MergedColumn({
   };
   const toggle = (id: number) => update(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
   const allSelected = merged.length > 0 && selected.length === merged.length;
-  const canCreate = selected.length > 0 && BRANCH_PATTERN.test(branch.trim()) && !creating;
+  const canCreate = !readOnly && selected.length > 0 && BRANCH_PATTERN.test(branch.trim()) && !creating;
 
   if (loading) {
     return (
@@ -121,9 +124,16 @@ export function MergedColumn({
           {t('lanes.fromBase', { base: lane?.baseBranch ?? 'main' })}
         </p>
       </div>
+      {readOnly && (
+        <p className="flex items-start gap-1.5 text-[0.71875rem] leading-[1.4] text-[#92400E]">
+          <Lock size={rem(12)} className="mt-px shrink-0" />
+          {t('lanes.readOnly')}
+        </p>
+      )}
       <button
         type="button"
         disabled={!canCreate}
+        title={readOnly ? t('lanes.readOnly') : undefined}
         onClick={() => onCreate(branch.trim(), selected)}
         className={cx(
           'grid rounded-lg px-3.5 py-[0.5625rem] text-[0.8125rem] font-semibold',

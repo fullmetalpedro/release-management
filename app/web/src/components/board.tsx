@@ -1,11 +1,11 @@
 import {
   CheckCheck,
   CircleCheck,
-  CornerUpLeft,
-  Eye,
+  Clock3,
   GitCompareArrows,
   GitMerge,
   GitPullRequest,
+  Layers,
   MessageSquare,
   UserCheck,
   Users,
@@ -13,8 +13,10 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import type { PullRequestCard } from '../lib/api';
+import type { BoardColumnId, PullRequestCard } from '../lib/api';
 import { age, authorLabel } from '../lib/format';
+import { oldestWaiting, WAITING_COLUMNS, waitingBand, waitingLabel, type WaitingBand } from '../lib/waiting';
+import { cardKey } from '../lib/newPrs';
 import { Avatar, cx, Dot, SkeletonCard } from './ui';
 import { t } from '../lib/i18n';
 import { rem } from '../lib/units';
@@ -42,16 +44,69 @@ export const COLUMNS = [
   column('release', '#8B5CF6'),
 ];
 
+// Cores do relógio por faixa de espera: neutro, âmbar e vermelho.
+const BAND_TONE: Record<WaitingBand, { chip: string; icon: string; text: string }> = {
+  fresh: { chip: 'bg-[#F1F5F9]', icon: 'text-mute', text: 'text-ink-2' },
+  attention: { chip: 'bg-[#FEF3C7]', icon: 'text-[#B45309]', text: 'text-[#92400E]' },
+  stale: { chip: 'bg-[#FEE2E2]', icon: 'text-[#DC2626]', text: 'text-[#991B1B]' },
+};
+
+// "Aguardando você há 3d": há quanto tempo o PR espera por alguém, na cor da faixa.
+function WaitingBadge({ pr, column, now }: { pr: PullRequestCard; column: BoardColumnId; now: number }) {
+  const tone = BAND_TONE[waitingBand(pr.waitingSince, now)];
+  const hint = pr.reason === 'reviewer' ? t('card.reviewer') : pr.reason === 'waiting-author' ? t('card.waitingAuthor') : undefined;
+  return (
+    <span className={cx('flex items-center gap-1.5 self-start rounded px-2 py-1', tone.chip)} title={hint}>
+      <Clock3 size={rem(12)} className={tone.icon} />
+      <span className={cx('text-xs font-medium', tone.text)}>{t(waitingLabel(pr, column), { age: age(pr.waitingSince, now) })}</span>
+    </span>
+  );
+}
+
+// Maior espera da coluna, no cabeçalho ("máx. 4d").
+export function WaitingMax({ cards, now }: { cards: PullRequestCard[]; now: number }) {
+  const since = oldestWaiting(cards);
+  if (!since) return null;
+  return (
+    <span className={cx('flex items-center gap-1 text-xs font-semibold', BAND_TONE[waitingBand(since, now)].icon)} title={t('waiting.maxHint')}>
+      <Clock3 size={rem(12)} />
+      {t('waiting.max', { age: age(since, now) })}
+    </span>
+  );
+}
+
 // `color` é a cor que o usuário deu ao repositório: vira a borda do card, para reconhecer de longe de onde é o PR.
-export function PrCard({ pr, now, color }: { pr: PullRequestCard; now: number; color?: string }) {
+// `column` é onde o card está: nas colunas de espera, o card mostra há quanto tempo o PR aguarda alguém.
+// `fresh`: o PR acabou de chegar em "Depende de mim" (badge Novo e um halo, até o próximo sync ou até ser aberto).
+export function PrCard({
+  pr,
+  now,
+  color,
+  column,
+  fresh,
+  onOpen,
+}: {
+  pr: PullRequestCard;
+  now: number;
+  color?: string;
+  column: BoardColumnId;
+  fresh?: boolean;
+  onOpen?: () => void;
+}) {
   return (
     <a
       href={pr.webUrl}
       target="_blank"
       rel="noreferrer"
+      data-fresh={fresh || undefined}
+      onClick={onOpen}
+      // Clique do meio também abre o PR, numa aba nova.
+      onAuxClick={(event) => event.button === 1 && onOpen?.()}
       className={cx(
         'stroke fade-up flex flex-col gap-2.5 rounded-lg bg-white p-3.5 hover:shadow-[0_0.375rem_1rem_#0F172A1A]',
         !color && 'hover:[--stroke:#94A3B8]',
+        fresh && 'shadow-[0_0_0_0.1875rem_#FDE68A] hover:shadow-[0_0_0_0.1875rem_#FDE68A,0_0.375rem_1rem_#0F172A1A]',
+        fresh && !color && '[--stroke:#F59E0B]',
       )}
       style={color ? ({ '--stroke': color, outlineWidth: 1.5, outlineOffset: -0.75 } as CSSProperties) : undefined}
     >
@@ -61,23 +116,24 @@ export function PrCard({ pr, now, color }: { pr: PullRequestCard; now: number; c
           <span className="truncate font-mono text-[0.71875rem] text-mute">{pr.repository.name}</span>
           <span className="font-mono text-[0.71875rem] text-faint">#{pr.id}</span>
         </div>
-        <span className="shrink-0 text-xs text-faint">{age(pr.createdAt, now)}</span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {fresh && (
+            <span className="rounded bg-[#F59E0B] px-1.5 py-px text-[0.6875rem] font-semibold text-white">{t('newPrs.badge')}</span>
+          )}
+          <span className="text-xs text-faint">{age(pr.createdAt, now)}</span>
+        </span>
       </div>
+
+      {pr.project && (
+        <span className="-mb-1 flex max-w-full items-center gap-1 self-start rounded bg-[#EEF2FF] px-1.5 py-0.5" title={t('card.project')}>
+          <Layers size={rem(11)} className="shrink-0 text-[#4F46E5]" />
+          <span className="truncate text-[0.6875rem] font-medium text-[#3730A3]">{pr.project.name}</span>
+        </span>
+      )}
 
       <p className="text-sm font-semibold leading-[1.35] text-ink">{pr.title}</p>
 
-      {pr.reason === 'reviewer' && (
-        <span className="flex items-center gap-1.5 self-start rounded bg-[#FEF3C7] px-2 py-1">
-          <Eye size={rem(12)} className="text-[#B45309]" />
-          <span className="text-xs font-medium text-[#92400E]">{t('card.reviewer')}</span>
-        </span>
-      )}
-      {pr.reason === 'waiting-author' && (
-        <span className="flex items-center gap-1.5 self-start rounded bg-[#FFEDD5] px-2 py-1">
-          <CornerUpLeft size={rem(12)} className="text-[#C2410C]" />
-          <span className="text-xs font-medium text-[#9A3412]">{t('card.waitingAuthor')}</span>
-        </span>
-      )}
+      {WAITING_COLUMNS.includes(column) && <WaitingBadge pr={pr} column={column} now={now} />}
 
       <div className="flex items-center gap-1.5">
         <GitMerge size={rem(13)} className="shrink-0 text-faint" />
@@ -364,6 +420,30 @@ export function ReviewerScopeToggle({ value, onChange }: { value: ReviewerScope;
   );
 }
 
+// No lugar de Mergeados e Release, com todos os projetos: as duas colunas dependem de um repositório.
+export function PerRepositoryPlaceholder({ onChooseProject }: { onChooseProject: () => void }) {
+  return (
+    <section
+      aria-label={t('board.perRepositoryTitle')}
+      className="stroke flex min-w-[14.0625rem] flex-[2] basis-0 flex-col items-center gap-3 self-start rounded-xl border-dashed bg-lane px-6 py-10 text-center [--stroke:#E2E8F0]"
+    >
+      <span className="flex gap-1.5">
+        <Dot color={COLUMNS.find((c) => c.id === 'merged')!.color} />
+        <Dot color={COLUMNS.find((c) => c.id === 'release')!.color} />
+      </span>
+      <p className="text-sm font-semibold text-ink">{t('board.perRepositoryTitle')}</p>
+      <p className="max-w-[22rem] text-[0.78125rem] leading-[1.45] text-mute">{t('board.perRepositoryBody')}</p>
+      <button
+        type="button"
+        onClick={onChooseProject}
+        className="stroke hover-surface rounded-lg bg-white px-3 py-[0.4375rem] text-[0.8125rem] font-medium text-ink"
+      >
+        {t('board.chooseProject')}
+      </button>
+    </section>
+  );
+}
+
 export function QuietNote({ children }: { children: ReactNode }) {
   return <p className="px-1.5 pb-1 text-xs text-faint">{children}</p>;
 }
@@ -376,7 +456,10 @@ export function OpenColumn({
   filtered,
   now,
   controls,
+  headerAction,
   repositoryColors,
+  fresh,
+  onOpen,
   emptyNote = t('board.noneFiltered'),
 }: {
   id: Exclude<ColumnId, 'merged' | 'release'>;
@@ -388,8 +471,12 @@ export function OpenColumn({
   now: number;
   // Controles próprios da coluna, logo abaixo do cabeçalho.
   controls?: ReactNode;
+  headerAction?: ReactNode;
   // Cor que o usuário deu a cada repositório, por id.
   repositoryColors?: Record<string, string>;
+  // PRs que acabaram de chegar (por `cardKey`) e o aviso de que um deles foi aberto.
+  fresh?: ReadonlySet<string>;
+  onOpen?: (key: string) => void;
   emptyNote?: string;
 }) {
   if (loading) {
@@ -402,9 +489,17 @@ export function OpenColumn({
     );
   }
   return (
-    <ColumnShell id={id} count={cards.length} top={controls}>
+    <ColumnShell id={id} count={cards.length} top={controls} headerAction={headerAction}>
       {cards.map((pr) => (
-        <PrCard key={`${pr.provider}-${pr.repository.id}-${pr.id}`} pr={pr} now={now} color={repositoryColors?.[pr.repository.id]} />
+        <PrCard
+          key={cardKey(pr)}
+          pr={pr}
+          now={now}
+          color={repositoryColors?.[pr.repository.id]}
+          column={id}
+          fresh={fresh?.has(cardKey(pr))}
+          onOpen={onOpen && (() => onOpen(cardKey(pr)))}
+        />
       ))}
       {cards.length === 0 && id === 'dependsOnMe' && emptyState && <EmptyState />}
       {cards.length === 0 && filtered && <QuietNote>{emptyNote}</QuietNote>}

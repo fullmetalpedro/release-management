@@ -15,6 +15,7 @@ import type { CreateReleaseBranchInput, SourceControl } from '../../core/ports/s
 import { compareVersionsDesc, literalPrefix } from '../../core/usecases/releaseNaming.ts';
 import { AzureDevOpsHttpError, isTransientStatus, mapLimit, type AzureDevOpsClient } from './client.ts';
 import { msg } from '../../i18n.ts';
+import { IMPOSSIBLE_SHA, PROBE_BRANCH, writeAllowed } from '../writeProbe.ts';
 
 interface List<T> {
   value: T[];
@@ -47,6 +48,21 @@ interface AdoPullRequest {
   mergeStatus?: string;
   reviewers?: AdoReviewer[];
   repository: { id: string; name: string; project: { id: string } };
+}
+
+interface AdoThread {
+  isDeleted?: boolean;
+  publishedDate?: string;
+  comments?: { commentType?: string; isDeleted?: boolean; publishedDate?: string }[];
+  // Threads de sistema: o tipo e os índices das pessoas envolvidas, que apontam para `identities`.
+  properties?: Record<string, { $value?: unknown } | undefined>;
+  identities?: Record<string, AdoIdentity | undefined>;
+}
+
+// Quando cada pessoa votou pela última vez e quando foi incluída como revisora, por id.
+export interface ReviewerActivity {
+  votedAt: Map<string, string>;
+  addedAt: Map<string, string>;
 }
 
 interface AdoCommit {
@@ -124,6 +140,31 @@ export function summarizePolicies(evaluations: AdoPolicyEvaluation[]): { require
   };
 }
 
+const isAfter = (date: string, than: string | undefined) => !than || Date.parse(date) > Date.parse(than);
+
+// As threads de sistema registram cada voto ("VoteUpdate") e cada inclusão de revisor ("ReviewersUpdate").
+// Quem entrou na criação do PR não ganha thread: fica sem data, e vale a criação.
+export function reviewerActivity(threads: AdoThread[]): ReviewerActivity {
+  const activity: ReviewerActivity = { votedAt: new Map(), addedAt: new Map() };
+  for (const thread of threads) {
+    const props = thread.properties ?? {};
+    const type = props.CodeReviewThreadType?.$value;
+    const date = thread.publishedDate ?? thread.comments?.[0]?.publishedDate;
+    if (!date || (type !== 'VoteUpdate' && type !== 'ReviewersUpdate')) continue;
+    const target = type === 'VoteUpdate' ? activity.votedAt : activity.addedAt;
+    const keys = Object.keys(props).filter((key) =>
+      type === 'VoteUpdate' ? key === 'CodeReviewVotedByIdentity' : key.startsWith('CodeReviewReviewersUpdatedAddedIdentity'),
+    );
+    for (const key of keys) {
+      for (const index of String(props[key]?.$value ?? '').match(/\d+/g) ?? []) {
+        const id = thread.identities?.[index]?.id;
+        if (id && isAfter(date, target.get(id))) target.set(id, date);
+      }
+    }
+  }
+  return activity;
+}
+
 export function pullRequestIdsFromCommits(commits: { comment?: string }[]): number[] {
   const ids = new Set<number>();
   for (const commit of commits) {
@@ -175,6 +216,17 @@ export class AzureDevOpsSourceControl implements SourceControl {
     return this.me;
   }
 
+  // O token pode criar branches? Pede a remoção de uma branch que não existe: com permissão, o provedor responde que
+  // não havia o que remover; sem, recusa o pedido. Nada muda no repositório.
+  async probeWriteAccess(projectId: string): Promise<boolean | undefined> {
+    const [repository] = await this.listRepositories(projectId);
+    if (!repository) return undefined;
+    const repoPath = `/${encodeURIComponent(projectId)}/_apis/git/repositories/${encodeURIComponent(repository.id)}`;
+    return writeAllowed(() =>
+      this.client.post(`${repoPath}/refs`, { body: [{ name: PROBE_BRANCH, oldObjectId: IMPOSSIBLE_SHA, newObjectId: ZERO_SHA }] }),
+    );
+  }
+
   async getAvatar(avatarKey: string): Promise<Avatar | undefined> {
     // A chave vira parte da URL: só segue adiante o que tem forma de descritor.
     if (!AVATAR_KEY.test(avatarKey)) return undefined;
@@ -201,13 +253,16 @@ export class AzureDevOpsSourceControl implements SourceControl {
 
   async listOpenPullRequests(projectId: string): Promise<PullRequest[]> {
     const active = await this.fetchActive(projectId);
+    // O limite vale por PR: no máximo CONCURRENCY PRs com as suas leituras em andamento ao mesmo tempo.
     return mapLimit(active, CONCURRENCY, async (pr) => {
-      const [commentCount, conflictCount, policies] = await Promise.all([
-        this.countCommentThreads(pr),
+      const [threads, conflictCount, policies, lastPushAt] = await Promise.all([
+        this.readThreads(pr),
         pr.mergeStatus === 'conflicts' ? this.countConflicts(pr) : 0,
         this.policiesOf(pr),
+        this.lastPushOf(pr),
       ]);
-      return { ...this.toPullRequest(pr, { commentCount, conflictCount }), ...policies };
+      const pullRequest = this.toPullRequest(pr, { commentCount: threads.commentCount, conflictCount }, threads.activity);
+      return { ...pullRequest, lastPushAt, ...policies };
     });
   }
 
@@ -411,16 +466,35 @@ export class AzureDevOpsSourceControl implements SourceControl {
     return value;
   }
 
-  private async countCommentThreads(pr: AdoPullRequest): Promise<number> {
+  // Uma leitura só serve à contagem de comentários e às datas de voto e de inclusão dos revisores.
+  private async readThreads(pr: AdoPullRequest): Promise<{ commentCount: number; activity?: ReviewerActivity }> {
     try {
-      const { value } = await this.client.get<
-        List<{ isDeleted?: boolean; comments?: { commentType?: string; isDeleted?: boolean }[] }>
-      >(`/${encodeURIComponent(pr.repository.project.id)}/_apis/git/repositories/${encodeURIComponent(pr.repository.id)}/pullRequests/${pr.pullRequestId}/threads`);
-      return value.filter(
+      const { value } = await this.client.get<List<AdoThread>>(
+        `/${encodeURIComponent(pr.repository.project.id)}/_apis/git/repositories/${encodeURIComponent(pr.repository.id)}/pullRequests/${pr.pullRequestId}/threads`,
+      );
+      const commentCount = value.filter(
         (thread) => !thread.isDeleted && thread.comments?.some((c) => c.commentType === 'text' && !c.isDeleted),
       ).length;
+      return { commentCount, activity: reviewerActivity(value) };
     } catch (error) {
-      if (error instanceof AzureDevOpsHttpError) return 0;
+      if (error instanceof AzureDevOpsHttpError) return { commentCount: 0 };
+      throw error;
+    }
+  }
+
+  // Cada push no PR vira uma iteração; a última diz quando chegou o código atual.
+  private async lastPushOf(pr: AdoPullRequest): Promise<string | undefined> {
+    try {
+      const { value } = await this.client.get<List<{ id: number; createdDate?: string }>>(
+        `/${encodeURIComponent(pr.repository.project.id)}/_apis/git/repositories/${encodeURIComponent(pr.repository.id)}/pullRequests/${pr.pullRequestId}/iterations`,
+      );
+      return value.reduce<string | undefined>(
+        (last, iteration) => (iteration.createdDate && isAfter(iteration.createdDate, last) ? iteration.createdDate : last),
+        undefined,
+      );
+    } catch (error) {
+      // Sem as iterações, o card cai na data de criação.
+      if (error instanceof AzureDevOpsHttpError) return undefined;
       throw error;
     }
   }
@@ -495,6 +569,7 @@ export class AzureDevOpsSourceControl implements SourceControl {
   private toPullRequest(
     pr: AdoPullRequest,
     counts: { commentCount: number; conflictCount: number } = { commentCount: 0, conflictCount: 0 },
+    activity?: ReviewerActivity,
   ): PullRequest {
     const repository: Repository = {
       id: pr.repository.id,
@@ -507,6 +582,8 @@ export class AzureDevOpsSourceControl implements SourceControl {
         reviewer: toPerson(reviewer),
         decision: toDecision(reviewer.vote),
         required: reviewer.isRequired ?? false,
+        addedAt: activity?.addedAt.get(reviewer.id),
+        votedAt: activity?.votedAt.get(reviewer.id),
       }));
     return {
       provider: 'azure-devops',

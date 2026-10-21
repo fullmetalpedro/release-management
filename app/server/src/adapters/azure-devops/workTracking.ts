@@ -9,6 +9,7 @@ import type {
 import type { WorkTracking } from '../../core/ports/workTracking.ts';
 import { AzureDevOpsHttpError, isTransientStatus, type AzureDevOpsClient } from './client.ts';
 import { msg } from '../../i18n.ts';
+import { writeAllowed } from '../writeProbe.ts';
 
 interface AdoWorkItem {
   id: number;
@@ -87,6 +88,25 @@ export class AzureDevOpsWorkTracking implements WorkTracking {
     const ids = workItems.map((item) => item.id);
     const loaded = await this.load(ids);
     return ids.flatMap((id) => loaded.filter((item) => item.id === id));
+  }
+
+  // O token pode editar work items? Um teste de revisão impossível, só validado (validateOnly): com permissão, o
+  // provedor recusa o teste; sem, recusa o pedido. O work item não muda.
+  async probeWriteAccess(projectId: string): Promise<boolean | undefined> {
+    const { workItems } = await this.client.post<{ workItems: { id: number }[] }>(`/${encodeURIComponent(projectId)}/_apis/wit/wiql`, {
+      query: { $top: 1 },
+      readOnly: true,
+      body: { query: 'SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project' },
+    });
+    const [item] = workItems;
+    if (!item) return undefined;
+    return writeAllowed(() =>
+      this.client.patch(`/_apis/wit/workitems/${item.id}`, {
+        query: { validateOnly: true },
+        contentType: 'application/json-patch+json',
+        body: [{ op: 'test', path: '/rev', value: -1 }],
+      }),
+    );
   }
 
   async linkPullRequest(workItemId: number, ref: PullRequestRef): Promise<void> {

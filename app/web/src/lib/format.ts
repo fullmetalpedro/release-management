@@ -70,10 +70,14 @@ export function useNow(intervalMs = 30_000): number {
   return now;
 }
 
+// Quem lê a mesma chave fica em sincronia: mudar a preferência num componente vale para os outros que a usam.
+const storedListeners = new Map<string, Set<(value: unknown) => void>>();
+
 // `isValid` confere o formato do que estava guardado: uma versão antiga da aplicação (ou outra aba) pode ter
 // gravado algo que esta não entende, e aí vale o valor inicial.
+// A chave pode mudar (uma preferência por organização, por exemplo): o valor é relido da chave nova.
 export function useStoredState<T>(key: string, initial: T, isValid?: (value: unknown) => value is T): [T, (value: T) => void] {
-  const [value, setValue] = useState<T>(() => {
+  const read = (): T => {
     try {
       const raw = localStorage.getItem(key);
       if (raw === null) return initial;
@@ -82,9 +86,22 @@ export function useStoredState<T>(key: string, initial: T, isValid?: (value: unk
     } catch {
       return initial;
     }
-  });
+  };
+  const [state, setState] = useState(() => ({ key, value: read() }));
+  const value = state.key === key ? state.value : read();
+  if (state.key !== key) setState({ key, value });
+  useEffect(() => {
+    const listeners = storedListeners.get(key) ?? new Set();
+    storedListeners.set(key, listeners);
+    const listener = (next: unknown) => setState({ key, value: next as T });
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, [key]);
   const update = (next: T) => {
-    setValue(next);
+    setState({ key, value: next });
+    for (const listener of storedListeners.get(key) ?? []) listener(next);
     try {
       localStorage.setItem(key, JSON.stringify(next));
     } catch {

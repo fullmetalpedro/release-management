@@ -5,7 +5,8 @@ import { AzureDevOpsClient, basicFromPat } from '../azure-devops/client.ts';
 import { AzureDevOpsSourceControl } from '../azure-devops/sourceControl.ts';
 import { GitHubSourceControl } from '../github/sourceControl.ts';
 import { JiraWorkTracking, parseJiraSite, resolveCloudId } from '../jira/workTracking.ts';
-import type { PatProvider } from '../session/sessionStore.ts';
+import type { Capability, PatProvider } from '../session/sessionStore.ts';
+import { AzureDevOpsWorkTracking } from '../azure-devops/workTracking.ts';
 import { parseGitHubOwner, parseOrganization } from './patTransport.ts';
 import { msg } from '../../i18n.ts';
 
@@ -27,7 +28,14 @@ export interface PatInput {
 export interface PatValidation {
   owner: Person;
   cloudId?: string;
+  // Escritas que o token não pode fazer (token só de leitura), descobertas na conexão.
+  denied?: Capability[];
 }
+
+// Uma sondagem que falha não impede a conexão: sem resposta, a primeira escrita de verdade decide.
+const probe = (run: () => Promise<boolean | undefined>) => run().catch(() => undefined);
+const deniedOf = (results: [Capability, boolean | undefined][]) =>
+  results.filter(([, allowed]) => allowed === false).map(([capability]) => capability);
 
 // Confere o token na plataforma e devolve o dono dele; trocável nos testes.
 export type PatValidator = (provider: PatProvider, input: PatInput) => Promise<PatValidation>;
@@ -48,21 +56,30 @@ export function createPatValidator(config: AppConfig): PatValidator {
   const branching = { releasePattern: config.branching.releasePattern, developBranch: config.branching.developBranch };
   return async (provider, { account, token, email }) => {
     if (provider === 'azure-devops') {
-      const sourceControl = new AzureDevOpsSourceControl(new AzureDevOpsClient(account, async () => basicFromPat(token)), branching);
+      const client = new AzureDevOpsClient(account, async () => basicFromPat(token));
+      const sourceControl = new AzureDevOpsSourceControl(client, branching);
       // A identidade sozinha não prova nada: o Azure DevOps responde como anônimo a um token inválido.
       // Listar projetos exige autenticação de verdade.
-      await sourceControl.listProjects();
-      return { owner: await sourceControl.currentUser() };
+      const [project] = await sourceControl.listProjects();
+      const owner = await sourceControl.currentUser();
+      if (!project) return { owner };
+      const tracking = new AzureDevOpsWorkTracking(client);
+      const [code, work] = await Promise.all([
+        probe(() => sourceControl.probeWriteAccess(project.id)),
+        probe(() => tracking.probeWriteAccess(project.id)),
+      ]);
+      return { owner, denied: deniedOf([['createRelease', code], ['linkWorkItems', work]]) };
     }
     if (provider === 'github') {
       const sourceControl = new GitHubSourceControl({ owner: account, ...branching }, async () => token);
       const owner = await sourceControl.currentUser();
       // Confere também que o token enxerga a organização informada.
       await sourceControl.listRepositories(account);
-      return { owner };
+      return { owner, denied: deniedOf([['createRelease', await probe(() => sourceControl.probeWriteAccess())]]) };
     }
     const cloudId = await resolveCloudId(account);
-    const owner = await new JiraWorkTracking({ site: account, cloudId, email: email! }, async () => token).currentUser();
-    return { owner, cloudId };
+    const tracking = new JiraWorkTracking({ site: account, cloudId, email: email! }, async () => token);
+    const owner = await tracking.currentUser();
+    return { owner, cloudId, denied: deniedOf([['linkWorkItems', await probe(() => tracking.probeWriteAccess())]]) };
   };
 }

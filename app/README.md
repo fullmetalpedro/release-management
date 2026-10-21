@@ -37,7 +37,8 @@ docker compose up -d --build
 Open http://localhost:3001. Before starting, set in `.env`:
 
 - `APP_URL=http://localhost:3001`, the URL the browser uses.
-- `SESSION_SECRET`, so sessions survive a restart. They are kept encrypted in the `data` volume.
+- `SESSION_SECRET`, so sessions survive a restart. They are kept encrypted in the `data` volume. It is required: without it, `docker compose up` stops with `defina SESSION_SECRET`.
+- `SESSION_MAX_AGE_DAYS`, optional (default 30): how many days a session lasts without use.
 - `AZDO_ORG`, optional, to fill in the organization on the sign-in screen.
 
 After changing `.env`, run `docker compose up -d` again. `docker compose down -v` also deletes the volume and, with it, every session.
@@ -74,7 +75,11 @@ The personal access token is never in plain text outside the process memory at t
 - **On the server:** it is validated on the platform and stored sealed with AES-256-GCM, both in the in-memory session and in the `.data/sessions.enc` file.
 - **In the browser:** only the session cookie (HttpOnly) exists, and it doesn't contain the token.
 
-Without `SESSION_SECRET`, sessions aren't written to disk and are lost on every restart. Use HTTPS in production regardless: the transit encryption is an extra layer (the token doesn't appear in proxy logs or in the request body), but it doesn't protect the session cookie and doesn't hold against someone who can alter the traffic.
+Without `SESSION_SECRET`, sessions aren't written to disk and are lost on every restart. The server warns about it at startup, and `GET /auth/mode` reports `sessionsPersisted: false`. Changing the secret makes the saved `sessions.enc` unreadable: the server logs that and everyone signs in again.
+
+Sessions expire after `SESSION_MAX_AGE_DAYS` days (default 30) **without use**: each use renews the session and the cookie, so whoever uses the app regularly stays signed in. The renewal is written to disk at most once an hour per session. A token rejected by one platform only marks that connection as needing to reconnect; the session ends only when no valid connection is left.
+
+Use HTTPS in production regardless: the transit encryption is an extra layer (the token doesn't appear in proxy logs or in the request body), but it doesn't protect the session cookie and doesn't hold against someone who can alter the traffic.
 
 The server also:
 

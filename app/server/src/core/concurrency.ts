@@ -27,3 +27,22 @@ export async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T>
     if (locks.get(key) === settled) locks.delete(key);
   }
 }
+
+// Fila com no máximo `limit` tarefas em andamento, compartilhada entre quem a recebe: a caixa de entrada usa uma só
+// para as requisições de todas as organizações.
+export function createLimiter(limit: number) {
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    // Quem espera recebe a vaga de quem terminou, sem passar pela contagem: assim ninguém fura a fila.
+    if (running >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    else running++;
+    try {
+      return await task();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else running--;
+    }
+  };
+}

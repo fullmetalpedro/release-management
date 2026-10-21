@@ -7,7 +7,9 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import type { AppConfig } from '../../config.ts';
 import {
   CherryPickConflictError,
+  ConnectionExpiredError,
   LocalizedError,
+  WriteNotAllowedError,
   NotAuthenticatedError,
   NotFoundError,
   ProviderUnavailableError,
@@ -15,7 +17,10 @@ import {
   ValidationError,
 } from '../../core/domain/errors.ts';
 import type { IdentityProvider } from '../../core/ports/identityProvider.ts';
+import { getAllProjectsBoard } from '../../core/usecases/allProjectsBoard.ts';
 import { getBoard } from '../../core/usecases/board.ts';
+import { getInbox, INBOX_CONCURRENCY } from '../../core/usecases/inbox.ts';
+import { createLimiter } from '../../core/concurrency.ts';
 import { listProjects } from '../../core/usecases/projects.ts';
 import { getReleaseDetails } from '../../core/usecases/releaseDetails.ts';
 import { createRelease, getReleaseLane, getReleaseLanes } from '../../core/usecases/releaseLane.ts';
@@ -31,7 +36,7 @@ import {
 } from './patProviders.ts';
 import { PatTransport } from './patTransport.ts';
 import { ALEX } from '../memory/world.ts';
-import type { PatProvider, Session, SessionStore, SourceProvider } from '../session/sessionStore.ts';
+import { CAPABILITIES, connectionId, connectionOf, type Capability, type PatConnection, type PatProvider, type Session, type SessionStore, type SourceProvider } from '../session/sessionStore.ts';
 import { localeFrom, msg, render } from '../../i18n.ts';
 
 const SESSION_COOKIE = 'rm_session';
@@ -123,7 +128,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       sameSite: 'lax',
       secure,
       signed: true,
-      maxAge: 30 * 24 * 60 * 60,
+      // A mesma validade do store: ao renovar a sessão, o cookie é renovado junto.
+      maxAge: Math.floor(sessions.maxAgeMs / 1000),
     });
   };
 
@@ -137,6 +143,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   };
 
   app.addHook('onSend', async (_request, reply) => secureHeaders(reply));
+
+  // Expiração deslizante: quem usa o app não é deslogado. O store grava no máximo uma vez por hora por sessão, e só
+  // então o cookie é reenviado com a validade nova.
+  app.addHook('onRequest', async (request, reply) => {
+    const session = sessionOf(request);
+    if (session && sessions.touch(session.id)) startSession(reply, session);
+  });
 
   // As rotas de entrada são as únicas abertas a quem não tem sessão: limite por IP, somado entre elas.
   await app.register(rateLimit, {
@@ -154,8 +167,58 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const say = (request: FastifyRequest, key: Parameters<typeof msg>[0], params?: Parameters<typeof msg>[1]) =>
     render(msg(key, params), localeOf(request));
 
+  // Um token recusado derruba só a conexão dele. A sessão acaba quando não sobra nenhuma conexão válida.
+  const expireConnection = (request: FastifyRequest, reply: FastifyReply, error: ConnectionExpiredError): boolean => {
+    const session = sessionOf(request);
+    if (session?.mode !== 'pat' || !session.connections || !connectionOf(session, error.connectionId)) return false;
+    sessions.update(session.id, (stored) => {
+      const connection = connectionOf(stored, error.connectionId);
+      if (connection && !connection.expiredAt) connection.expiredAt = Date.now();
+    });
+    registry.forget(session.id);
+    if (Object.values(session.connections).every((connection) => connection.expiredAt)) {
+      endSession(request, reply);
+      return false;
+    }
+    return true;
+  };
+
+  // A conexão que faz esta escrita: a ativa (código e, no Azure DevOps, as tarefas) ou, com o GitHub, o Jira.
+  const writerOf = (session: Session, capability: Capability): [string, PatConnection] | undefined => {
+    const active = connectionOf(session, session.activeConnection);
+    if (!active) return undefined;
+    if (CAPABILITIES[active.provider].includes(capability)) return [session.activeConnection!, active];
+    return Object.entries(session.connections ?? {}).find(([, connection]) => CAPABILITIES[connection.provider].includes(capability));
+  };
+  const canWrite = (session: Session, capability: Capability) =>
+    session.mode !== 'pat' || !writerOf(session, capability)?.[1].denied?.includes(capability);
+  // Já se sabe que o token não escreve: recusa antes de chamar o provedor.
+  const requireWrite = (request: FastifyRequest, capability: Capability) => {
+    const session = sessionOf(request);
+    if (!session || canWrite(session, capability)) return;
+    const [id, connection] = writerOf(session, capability)!;
+    throw new WriteNotAllowedError(id, connection.account, capability);
+  };
+
   app.setErrorHandler((error, request, reply) => {
     const message = error instanceof LocalizedError ? error.messageIn(localeOf(request)) : '';
+    if (error instanceof WriteNotAllowedError) {
+      const session = sessionOf(request);
+      if (session) {
+        sessions.update(session.id, (stored) => {
+          const connection = connectionOf(stored, error.connectionId);
+          if (connection && !connection.denied?.includes(error.capability)) connection.denied = [...(connection.denied ?? []), error.capability];
+        });
+        registry.forget(session.id);
+      }
+      return reply.status(403).send({ code: 'read-only', connectionId: error.connectionId, capability: error.capability, message });
+    }
+    if (error instanceof ConnectionExpiredError) {
+      if (expireConnection(request, reply, error)) {
+        return reply.status(401).send({ code: 'connection-expired', connectionId: error.connectionId, message });
+      }
+      return reply.status(401).send({ code: 'unauthenticated', message });
+    }
     if (error instanceof NotAuthenticatedError) {
       endSession(request, reply);
       return reply.status(401).send({ code: 'unauthenticated', message });
@@ -200,6 +263,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     pat: !config.demo,
     demo: config.demo,
     defaultOrganization: config.demo ? '' : config.organization,
+    // Sem SESSION_SECRET as sessões ficam só em memória e caem a cada restart.
+    sessionsPersisted: !!config.sessionFile,
   }));
 
   if (!config.demo) {
@@ -212,7 +277,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       return { algorithm: 'RSA-OAEP-256+A256GCM', publicKey: transport.publicKeySpki, nonce: transport.issueNonce() };
     });
 
-    // Conecta (ou troca) o token de uma plataforma. As conexões se somam na mesma sessão.
+    // Conecta uma organização. As conexões se somam na mesma sessão; conectar de novo a mesma organização troca só o
+    // token dela (é assim que se reconecta um token expirado).
     app.post<{
       Params: { provider: string };
       Body: { organization?: unknown; site?: unknown; email?: unknown; encryptedToken?: unknown };
@@ -243,45 +309,87 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         throw error;
       }
 
-      const { owner, cloudId } = validation;
-      const connection = { account, sealedToken: sessions.seal(token), handle: owner.email ?? owner.name, email, cloudId };
+      const { owner, cloudId, denied } = validation;
+      const id = connectionId(provider, account);
+      const connection: PatConnection = {
+        provider,
+        account,
+        sealedToken: sessions.seal(token),
+        handle: owner.email ?? owner.name,
+        name: owner.name,
+        email,
+        cloudId,
+        ...(denied?.length ? { denied } : {}),
+      };
       const current = sessionOf(request);
-      let session: Session;
       if (current?.mode === 'pat') {
-        // Trocar o token de uma plataforma substitui só a conexão dela; as outras continuam.
         sessions.update(current.id, (stored) => {
-          stored.connections = { ...stored.connections, [provider]: connection };
-          if (isSource(provider) && (!stored.activeSource || stored.activeSource === provider)) {
-            stored.activeSource = provider;
+          const connections = { ...stored.connections };
+          const isNew = !Object.hasOwn(connections, id);
+          // O Jira continua sendo um site só por sessão, pareado com o GitHub ativo.
+          if (provider === 'jira') {
+            for (const [key, other] of Object.entries(connections)) if (other.provider === 'jira') delete connections[key];
+          }
+          connections[id] = connection;
+          stored.connections = connections;
+          // A organização recém-conectada passa a mostrar os PRs; reconectar uma que já existia não muda a ativa.
+          const active = connectionOf(stored, stored.activeConnection);
+          if (isSource(provider) && (isNew || !active || active.expiredAt || stored.activeConnection === id)) {
+            stored.activeConnection = id;
             stored.user = { name: owner.name, email: owner.email };
           }
         });
         registry.forget(current.id);
-        session = sessions.get(current.id)!;
       } else {
         endSession(request, reply);
-        session = sessions.create({
+        const session = sessions.create({
           mode: 'pat',
           user: { name: owner.name, email: owner.email },
-          connections: { [provider]: connection },
-          activeSource: isSource(provider) ? provider : undefined,
+          connections: { [id]: connection },
+          activeConnection: isSource(provider) ? id : undefined,
         });
         startSession(reply, session);
       }
-      return { provider, account, user: { name: owner.name, email: owner.email } };
+      return { id, provider, account, user: { name: owner.name, email: owner.email } };
     });
 
-    // Escolhe qual plataforma conectada fornece os PRs.
-    app.post<{ Body: { provider?: unknown } }>('/auth/active', async (request, reply) => {
+    // Escolhe qual organização conectada fornece os PRs.
+    app.post<{ Body: { connectionId?: unknown } }>('/auth/active', async (request, reply) => {
       requireFetchHeader(request);
       const session = sessionOf(request);
       if (!session) throw new NotAuthenticatedError();
-      const provider = PAT_PROVIDERS.filter(isSource).find((p) => p === request.body?.provider);
-      const connection = provider && session.connections?.[provider];
-      if (session.mode !== 'pat' || !provider || !connection) throw new ValidationError(msg('platformNotConnected'));
+      const id = request.body?.connectionId;
+      const connection = connectionOf(session, id);
+      if (session.mode !== 'pat' || typeof id !== 'string' || !connection || !isSource(connection.provider)) {
+        throw new ValidationError(msg('connectionNotFound'));
+      }
+      if (connection.expiredAt) throw new ValidationError(msg('connectionExpired', { account: connection.account }));
       sessions.update(session.id, (stored) => {
-        stored.activeSource = provider;
-        stored.user = { name: stored.user.name, email: connection.handle ?? stored.user.email };
+        stored.activeConnection = id;
+        stored.user = { name: connection.name ?? stored.user.name, email: connection.handle ?? stored.user.email };
+      });
+      registry.forget(session.id);
+      return reply.status(204).send();
+    });
+
+    // Remove uma organização. Se era a ativa, outra organização válida assume; sem nenhuma conexão, a sessão acaba.
+    app.delete<{ Params: { id: string } }>('/auth/connections/:id', async (request, reply) => {
+      requireFetchHeader(request);
+      const session = sessionOf(request);
+      if (!session) throw new NotAuthenticatedError();
+      const { id } = request.params;
+      if (session.mode !== 'pat' || !session.connections || !connectionOf(session, id)) throw new NotFoundError(msg('connectionNotFound'));
+      const remaining = Object.entries(session.connections).filter(([key]) => key !== id);
+      if (remaining.length === 0) {
+        endSession(request, reply);
+        return reply.status(204).send();
+      }
+      sessions.update(session.id, (stored) => {
+        stored.connections = Object.fromEntries(remaining);
+        if (stored.activeConnection !== id) return;
+        const next = remaining.find(([, connection]) => isSource(connection.provider) && !connection.expiredAt);
+        stored.activeConnection = next?.[0];
+        if (next) stored.user = { name: next[1].name ?? stored.user.name, email: next[1].handle ?? stored.user.email };
       });
       registry.forget(session.id);
       return reply.status(204).send();
@@ -365,7 +473,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     api.get<{ Params: { key: string } }>('/avatars/:key', async (request, reply) => {
       const session = sessionOf(request)!;
       if (request.params.key.length > MAX_AVATAR_KEY_LENGTH) throw new ValidationError(msg('invalidId'));
-      const scope = session.activeSource ? `${session.activeSource}:${session.connections?.[session.activeSource]?.account}` : config.organization;
+      const scope = session.activeConnection ?? config.organization;
       const cacheKey = `${session.mode}|${scope}|${request.params.key}`;
       let cached = avatars.get(cacheKey);
       if (!cached || Date.now() - cached.at > (cached.avatar ? AVATAR_TTL_MS : MISSING_AVATAR_TTL_MS)) {
@@ -387,50 +495,118 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         .send(cached.avatar.data);
     });
 
-    api.get('/me', async (request) => {
+    api.get('/me', async (request, reply) => {
       const session = sessionOf(request)!;
-      const connections = session.connections ?? {};
-      const source: SourceProvider | undefined = session.mode === 'pat' ? session.activeSource : 'azure-devops';
+      const connections = Object.entries(session.connections ?? {});
+      const active = connectionOf(session, session.activeConnection);
+      const source: SourceProvider | undefined =
+        session.mode === 'pat' ? (active && isSource(active.provider) ? active.provider : undefined) : 'azure-devops';
+      const jira = connections.find(([, connection]) => connection.provider === 'jira')?.[1];
       // Com o Azure DevOps as tarefas vêm dele mesmo; com o GitHub, do Jira, se estiver conectado.
       const tracker: PatProvider | undefined =
-        source === 'azure-devops' ? 'azure-devops' : source === 'github' && connections.jira ? 'jira' : undefined;
+        source === 'azure-devops' ? 'azure-devops' : source === 'github' && jira && !jira.expiredAt ? 'jira' : undefined;
 
-      // A foto é um detalhe: se o provedor falhar aqui, o usuário segue com as iniciais.
+      // A foto é um detalhe: se o provedor falhar aqui, o usuário segue com as iniciais. Um token recusado marca a
+      // conexão como expirada, mas o menu de contas ainda precisa abrir para o usuário reconectar.
       const me =
-        session.mode === 'demo' || !source
+        session.mode === 'demo' || !source || active?.expiredAt
           ? undefined
           : await Promise.resolve()
               .then(() => connection(request).sourceControl.currentUser())
               .catch((error) => {
+                if (error instanceof ConnectionExpiredError) {
+                  if (expireConnection(request, reply, error)) return undefined;
+                  throw new NotAuthenticatedError();
+                }
                 if (error instanceof NotAuthenticatedError) throw error;
                 return undefined;
               });
+      const current = sessionOf(request)!;
 
       return {
-        user: { ...session.user, avatarKey: me?.avatarKey },
-        demo: session.mode === 'demo',
-        mode: session.mode,
+        user: { ...current.user, avatarKey: me?.avatarKey },
+        demo: current.mode === 'demo',
+        mode: current.mode,
         loginProvider: 'microsoft',
-        organization: (source && connections[source]?.account) ?? config.organization,
+        organization: active?.account ?? config.organization,
         source: source ? { provider: source, name: PROVIDER_LABELS[source] } : null,
         tracker: tracker ? { provider: tracker, name: PROVIDER_LABELS[tracker] } : null,
-        // Azure DevOps sempre primeiro; é a ordem em que as plataformas aparecem na interface.
-        accounts: PAT_PROVIDERS.map((provider) => {
-          if (session.mode !== 'pat') {
-            const connected = provider === 'azure-devops';
-            return connected
-              ? { provider, connected, active: true, handle: session.user.email ?? session.user.name }
-              : { provider, connected };
+        // O que dá para escrever com os tokens atuais; token só de leitura desabilita a ação na interface.
+        capabilities: { createRelease: canWrite(current, 'createRelease'), linkWorkItems: canWrite(current, 'linkWorkItems') },
+        // Agrupadas por plataforma, Azure DevOps sempre primeiro; é a ordem em que aparecem na interface. Plataforma
+        // sem nenhuma organização aparece uma vez, desconectada.
+        accounts: PAT_PROVIDERS.flatMap((provider) => {
+          if (current.mode !== 'pat') {
+            return provider === 'azure-devops'
+              ? [{ provider, connected: true, active: true, handle: current.user.email ?? current.user.name }]
+              : [{ provider, connected: false }];
           }
-          const saved = connections[provider];
-          return saved
-            ? { provider, connected: true, active: provider === source, handle: saved.handle ?? saved.account, account: saved.account }
-            : { provider, connected: false };
+          const saved = Object.entries(current.connections ?? {})
+            .filter(([, connection]) => connection.provider === provider)
+            .sort(([, a], [, b]) => a.account.localeCompare(b.account));
+          if (saved.length === 0) return [{ provider, connected: false }];
+          return saved.map(([id, connection]) => ({
+            id,
+            provider,
+            connected: true,
+            active: id === current.activeConnection,
+            handle: connection.handle ?? connection.account,
+            account: connection.account,
+            ...(connection.expiredAt ? { expiredAt: new Date(connection.expiredAt).toISOString() } : {}),
+            ...(connection.denied?.length ? { denied: connection.denied } : {}),
+          }));
         }),
       };
     });
 
     api.get('/projects', async (request) => listProjects(connection(request), config.projects));
+
+    // Fan-out pelos projetos da conexão; um projeto que falha vira aviso, e o motivo sai no idioma de quem pediu.
+    // Tudo o que depende do usuário, em todas as organizações conectadas e em todos os projetos de cada uma.
+    api.get('/inbox', async (request) => {
+      const session = sessionOf(request)!;
+      const limit = createLimiter(INBOX_CONCURRENCY);
+      const limitedFetch = (input: string, init?: RequestInit) => limit(() => fetch(input, init));
+      const sources = registry.sources(session, limitedFetch).map(({ connection: adapters, ...source }) => ({
+        ...source,
+        sourceControl: adapters?.sourceControl,
+      }));
+      const inbox = await getInbox(sources, {
+        allowed: config.projects,
+        reasonOf: (error) => {
+          if (error instanceof LocalizedError) return error.messageIn(localeOf(request));
+          request.log.error(error);
+          return say(request, 'internalError');
+        },
+        onExpired: (id) => {
+          sessions.update(session.id, (stored) => {
+            const expired = connectionOf(stored, id);
+            if (expired && !expired.expiredAt) expired.expiredAt = Date.now();
+          });
+          registry.forget(session.id);
+        },
+      });
+      const stored = sessionOf(request);
+      for (const connection of inbox.connections) {
+        const expiredAt = connectionOf(stored, connection.id)?.expiredAt;
+        if (connection.status === 'expired' && expiredAt) connection.expiredAt = new Date(expiredAt).toISOString();
+      }
+      return inbox;
+    });
+
+    api.get('/board/all', async (request) =>
+      getAllProjectsBoard(
+        {
+          ...connection(request),
+          reasonOf: (error) => {
+            if (error instanceof LocalizedError) return error.messageIn(localeOf(request));
+            request.log.error(error);
+            return say(request, 'internalError');
+          },
+        },
+        config.projects,
+      ),
+    );
 
     api.get<{ Params: { projectId: string } }>('/projects/:projectId/board', async (request) =>
       getBoard(connection(request), request.params.projectId),
@@ -457,6 +633,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     api.post<{ Params: RepoParams; Body: { name?: unknown; pullRequestIds?: unknown } }>(
       '/projects/:projectId/repositories/:repositoryId/releases',
       async (request, reply) => {
+        requireWrite(request, 'createRelease');
         const { name, pullRequestIds } = request.body ?? {};
         if (typeof name !== 'string' || !Array.isArray(pullRequestIds) || pullRequestIds.length === 0 || !pullRequestIds.every(isPositiveInteger)) {
           throw new ValidationError(msg('branchAndPrsRequired'));
@@ -490,11 +667,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     });
 
     api.put<{ Params: LinkParams }>(linkRoute, async (request, reply) => {
+      requireWrite(request, 'linkWorkItems');
       await linkWorkItem(connection(request), Number(request.params.workItemId), refOf(request.params));
       return reply.status(204).send();
     });
 
     api.delete<{ Params: LinkParams }>(linkRoute, async (request, reply) => {
+      requireWrite(request, 'linkWorkItems');
       await unlinkWorkItem(connection(request), Number(request.params.workItemId), refOf(request.params));
       return reply.status(204).send();
     });

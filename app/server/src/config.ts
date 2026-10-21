@@ -4,6 +4,7 @@ import type { BranchingConfig } from './core/usecases/releaseLane.ts';
 import { DEFAULT_RELEASE_PATTERN, isValidBranchName } from './core/usecases/releaseNaming.ts';
 import type { EntraConfig } from './adapters/entra/identityProvider.ts';
 import type { MemoryFaults } from './adapters/memory/memoryAdapters.ts';
+import { DEFAULT_SESSION_MAX_AGE_DAYS } from './adapters/session/sessionStore.ts';
 
 export interface AppConfig {
   port: number;
@@ -19,6 +20,8 @@ export interface AppConfig {
   branching: BranchingConfig;
   sessionSecret: string;
   sessionFile?: string;
+  // Dias sem uso até a sessão vencer; cada uso renova a contagem.
+  sessionMaxAgeDays: number;
   demoFaults: MemoryFaults;
 }
 
@@ -55,6 +58,13 @@ function firstRelease(value: string | undefined): string {
   return name;
 }
 
+function sessionMaxAgeDays(value: string | undefined): number {
+  if (!value?.trim()) return DEFAULT_SESSION_MAX_AGE_DAYS;
+  const days = Number(value);
+  if (!Number.isFinite(days) || days <= 0) throw new Error(`SESSION_MAX_AGE_DAYS precisa ser um número de dias maior que zero: ${value}`);
+  return days;
+}
+
 function port(value: string | undefined): number {
   const number = Number(value ?? 3001);
   if (!Number.isInteger(number) || number < 0 || number > 65535) throw new Error(`API_PORT não é uma porta válida: ${value}`);
@@ -86,6 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       firstRelease: firstRelease(env.RELEASE_FIRST),
     },
     demoFaults: parseDemoFaults(env.DEMO_FAIL),
+    sessionMaxAgeDays: sessionMaxAgeDays(env.SESSION_MAX_AGE_DAYS),
   };
 
   if (demo) {

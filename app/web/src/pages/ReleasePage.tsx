@@ -4,10 +4,12 @@ import {
   ChevronDown,
   ClipboardList,
   ExternalLink,
+  FileText,
   GitBranch,
   GitMerge,
   Link as LinkIcon,
   LoaderCircle,
+  Lock,
   Minimize2,
   RefreshCw,
   Search,
@@ -17,6 +19,7 @@ import {
 import { Popover } from 'radix-ui';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ReleaseNotesDialog } from '../components/releaseNotes';
 import { useToast } from '../components/toast';
 import { TopBar } from '../components/TopBar';
 import { Avatar, cx, RepoSelect } from '../components/ui';
@@ -28,8 +31,10 @@ import {
   type WorkItemStateCategory,
   type WorkItemSummary,
 } from '../lib/api';
-import { authorLabel, elapsedLabel, releaseMeta, shortDate, useNow } from '../lib/format';
-import { LANE_STALE_MS, releaseKey, SYNC_INTERVAL_MS, useAllLanes } from '../lib/lanes';
+import { SyncIntervalMenu, SyncStatus } from '../components/toolbar';
+import { authorLabel, releaseMeta, shortDate, useNow } from '../lib/format';
+import { LANE_STALE_MS, releaseKey, useAllLanes } from '../lib/lanes';
+import { autoSync, useSyncInterval } from '../lib/sync';
 import { useSession } from '../lib/session';
 import { t } from '../lib/i18n';
 import { rem } from '../lib/units';
@@ -237,13 +242,19 @@ function UnlinkedRow({
   onLink: (pr: LanePullRequest, item: WorkItem, done: () => void) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const { tracker } = useSession().me;
+  const { tracker, capabilities } = useSession().me;
   return (
     <div className="flex items-center gap-4 px-5 py-3">
       <div className="flex min-w-0 flex-1 basis-0">
         {/* Com o GitHub sem Jira não há de onde buscar tasks. */}
         {!tracker && <span className="ml-7 text-[0.8125rem] text-faint">{t('release.connectJira')}</span>}
-        {tracker && (
+        {tracker && !capabilities.linkWorkItems && (
+          <span className="ml-7 flex items-center gap-1.5 text-[0.8125rem] text-faint" title={t('release.readOnlyHint', { tracker: tracker.name })}>
+            <Lock size={rem(12)} />
+            {t('release.readOnly')}
+          </span>
+        )}
+        {tracker && capabilities.linkWorkItems && (
           <Popover.Root open={open} onOpenChange={setOpen}>
             <Popover.Trigger className="stroke ml-7 flex items-center gap-1.5 rounded-md bg-white px-2.5 py-[0.3125rem] [--stroke:#FCD34D] hover:bg-[#FEF3C7] hover:[--stroke:#F59E0B] data-[state=open]:bg-[#FEF3C7] data-[state=open]:[--stroke:#F59E0B]">
               <LinkIcon size={rem(13)} className="text-[#B45309]" />
@@ -284,7 +295,9 @@ export function ReleasePage() {
   const now = useNow();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const [syncInterval, setSyncInterval] = useSyncInterval();
   const [collapsed, setCollapsed] = useState<number[]>([]);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [freshLink, setFreshLink] = useState<{ pullRequestId: number; workItemId: number } | null>(null);
 
   const board = useQuery({
@@ -303,9 +316,8 @@ export function ReleasePage() {
     queryKey: releaseKey(projectId, repositoryId, branch),
     queryFn: () => api.release(projectId!, repositoryId!, branch),
     enabled: !!projectId && !!repositoryId,
-    staleTime: LANE_STALE_MS,
     gcTime: 3 * LANE_STALE_MS,
-    refetchInterval: SYNC_INTERVAL_MS,
+    ...autoSync(syncInterval, LANE_STALE_MS),
     retry: false,
   });
 
@@ -402,28 +414,32 @@ export function ReleasePage() {
             <span className="text-[0.8125rem] text-mute">
               {(release && releaseMeta(release, now)) || ' '}
             </span>
-            <button
-              type="button"
-              onClick={() => {
-                if (board.isError) void board.refetch();
-                void details.refetch();
-              }}
-              disabled={details.isFetching}
-              className="stroke flex items-center gap-1.5 rounded-md bg-white px-2.5 py-[0.3125rem] hover-surface"
-            >
-              <RefreshCw size={rem(13)} className={cx('text-ink-2', details.isFetching && 'animate-spin')} />
-              <span className="text-[0.78125rem] font-semibold text-ink">{details.isFetching ? t('common.syncing') : t('common.refresh')}</span>
-            </button>
-            <span
-              className={cx('text-xs', details.isError || board.isError ? 'text-[#DC2626]' : 'text-faint')}
-              title={(details.isError || board.isError) && data ? t('common.lastSync', { when: elapsedLabel(data.syncedAt, now) }) : undefined}
-            >
-              {details.isError || board.isError
-                ? t('common.syncFailed')
-                : data
-                  ? t('common.synced', { when: elapsedLabel(data.syncedAt, now) })
-                  : ''}
-            </span>
+            <div className="flex">
+              <button
+                type="button"
+                onClick={() => {
+                  if (board.isError) void board.refetch();
+                  void details.refetch();
+                }}
+                disabled={details.isFetching}
+                className="stroke flex items-center gap-1.5 rounded-l-md bg-white px-2.5 py-[0.3125rem] hover-surface"
+              >
+                <RefreshCw size={rem(13)} className={cx('text-ink-2', details.isFetching && 'animate-spin')} />
+                <span className="text-[0.78125rem] font-semibold text-ink">{details.isFetching ? t('common.syncing') : t('common.refresh')}</span>
+              </button>
+              <SyncIntervalMenu
+                value={syncInterval}
+                onChange={setSyncInterval}
+                className="stroke -ml-px flex items-center rounded-r-md bg-white px-1.5 hover-surface data-[state=open]:stroke-focus"
+                iconClassName="text-ink-2"
+              />
+            </div>
+            <SyncStatus
+              failed={details.isError || board.isError}
+              syncedAt={data?.syncedAt}
+              updatedAt={details.dataUpdatedAt}
+              interval={syncInterval}
+            />
           </div>
         </div>
 
@@ -444,6 +460,15 @@ export function ReleasePage() {
               value={repositoryId}
               onChange={(id) => setParams({ repo: id })}
             />
+            <button
+              type="button"
+              onClick={() => setNotesOpen(true)}
+              disabled={!data || !release}
+              className="stroke flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-white px-3.5 py-2 hover-surface disabled:pointer-events-none disabled:bg-[#F1F5F9]"
+            >
+              <FileText size={rem(14)} className={release ? 'text-ink-2' : 'text-faint'} />
+              <span className={cx('text-[0.8125rem] font-semibold', release ? 'text-ink' : 'text-faint')}>{t('notes.open')}</span>
+            </button>
             <a
               href={release?.webUrl}
               target="_blank"
@@ -595,6 +620,7 @@ export function ReleasePage() {
         </div>
       </main>
       </div>
+      {data && release && <ReleaseNotesDialog details={data} jira={jira} open={notesOpen} onOpenChange={setNotesOpen} />}
     </div>
   );
 }

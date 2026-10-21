@@ -106,6 +106,45 @@ describe('GitHub · pull requests', () => {
     ]);
   });
 
+  it('traz as datas de cada voto, do último pedido de revisão e do último commit', async () => {
+    const reviews = toReviews({
+      latestOpinionatedReviews: {
+        nodes: [{ state: 'CHANGES_REQUESTED', author: actor('ben', 4, 'Ben'), submittedAt: '2026-10-12T09:00:00Z' }],
+      },
+      reviewRequests: { nodes: [{ requestedReviewer: actor('alex', 1, 'Alex') }] },
+      timelineItems: {
+        nodes: [
+          { createdAt: '2026-10-10T12:00:00Z', requestedReviewer: actor('alex', 1, 'Alex') },
+          { createdAt: '2026-10-10T12:00:00Z', requestedReviewer: actor('ben', 4, 'Ben') },
+          // Pedido de novo: vale o mais recente.
+          { createdAt: '2026-10-11T08:00:00Z', requestedReviewer: actor('alex', 1, 'Alex') },
+          { createdAt: '2026-10-11T08:00:00Z', requestedReviewer: {} },
+          {},
+          null,
+        ],
+      },
+    });
+    expect(reviews).toMatchObject([
+      { reviewer: { id: '4' }, decision: 'waiting-author', addedAt: '2026-10-10T12:00:00Z', votedAt: '2026-10-12T09:00:00Z' },
+      { reviewer: { id: '1' }, decision: 'pending', addedAt: '2026-10-11T08:00:00Z' },
+    ]);
+
+    const { sourceControl, calls } = github({
+      'POST /graphql': () => ({
+        data: {
+          search: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [node({ commits: { nodes: [{ commit: { committedDate: '2026-10-13T10:00:00Z' } }] } }), node({ number: 13 })],
+          },
+        },
+      }),
+    });
+    const pulls = await sourceControl.listOpenPullRequests('acme');
+    // Nada de updatedAt: comentário e label mudam essa data.
+    expect(calls[0]!.body.query).not.toContain('updatedAt');
+    expect(pulls.map((pull) => pull.lastPushAt)).toEqual(['2026-10-13T10:00:00Z', undefined]);
+  });
+
   it('lista os PRs abertos da organização numa consulta só e os traduz para o modelo canônico', async () => {
     const { sourceControl, calls } = github({
       'POST /graphql': () => ({

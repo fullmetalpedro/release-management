@@ -33,6 +33,9 @@ export interface Review {
   decision: ReviewDecision;
   // O voto deste revisor é exigido pela política do repositório.
   required: boolean;
+  // Quando a pessoa entrou como revisora e quando deu o voto atual, se o provedor informa.
+  addedAt?: string;
+  votedAt?: string;
 }
 
 export type MergeState = 'clean' | 'conflicts' | 'unknown';
@@ -47,6 +50,8 @@ export interface PullRequest {
   author: Person;
   createdAt: string;
   closedAt?: string;
+  // Último push na branch do PR, se o provedor informa.
+  lastPushAt?: string;
   status: 'open' | 'merged';
   isDraft: boolean;
   mergeState: MergeState;

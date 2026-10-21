@@ -13,6 +13,7 @@ export type ProviderId = z.infer<typeof providerId>;
 export type BoardColumnId = 'dependsOnMe' | 'review' | 'conflict' | 'ready';
 
 const repositoryRef = z.object({ id: z.string(), name: z.string() });
+const projectRef = z.object({ id: z.string(), name: z.string() });
 
 const personView = z.object({ name: z.string(), isMe: z.boolean(), avatarKey: optional(z.string()) });
 export type PersonView = z.infer<typeof personView>;
@@ -26,17 +27,27 @@ const me = z.object({
   // De onde vêm os PRs e de onde vêm as tasks; sem tracker (GitHub sem Jira) não há tasks a vincular.
   source: platform.nullable(),
   tracker: platform.nullable(),
+  // O que dá para escrever com os tokens atuais. Token só de leitura desabilita a ação, sem derrubar o resto.
+  capabilities: z.object({ createRelease: z.boolean(), linkWorkItems: z.boolean() }),
+  // Uma linha por organização conectada (modo token), agrupadas por plataforma; plataforma sem nenhuma aparece uma
+  // vez, desconectada.
   accounts: z.array(
     z.object({
+      id: optional(z.string()),
       provider: providerId,
       connected: z.boolean(),
       active: optional(z.boolean()),
       handle: optional(z.string()),
       account: optional(z.string()),
+      // O provedor recusou o token: a organização pede para reconectar.
+      expiredAt: optional(z.string()),
+      // Escritas que o token não pode fazer (token só de leitura).
+      denied: optional(z.array(z.enum(['createRelease', 'linkWorkItems']))),
     }),
   ),
 });
 export type Me = z.infer<typeof me>;
+export type Account = Me['accounts'][number];
 
 const projectView = z.object({ id: z.string(), name: z.string(), openPullRequests: z.number() });
 export type ProjectView = z.infer<typeof projectView>;
@@ -57,7 +68,11 @@ const pullRequestCard = z.object({
   noReviewers: z.boolean(),
   reason: optional(z.enum(['reviewer', 'waiting-author'])),
   requiredReviewer: z.boolean(),
+  waitingSince: z.string(),
+  hasVotes: z.boolean(),
   webUrl: z.string(),
+  // Só no board de todos os projetos: de qual projeto é o PR.
+  project: optional(projectRef),
 });
 export type PullRequestCard = z.infer<typeof pullRequestCard>;
 
@@ -68,6 +83,46 @@ const board = z.object({
   repositories: z.array(repositoryRef),
 });
 export type Board = z.infer<typeof board>;
+
+const allProjectsBoard = z.object({
+  syncedAt: z.string(),
+  projects: z.array(projectRef),
+  items: z.array(
+    pullRequestCard.extend({ column: z.enum(['dependsOnMe', 'review', 'conflict', 'ready']), project: projectRef }),
+  ),
+  failed: z.array(z.object({ project: projectRef, reason: z.string() })),
+  skipped: z.number(),
+});
+export type AllProjectsBoard = z.infer<typeof allProjectsBoard>;
+
+// O que depende de mim em todas as organizações conectadas. Uma organização expirada ou fora do ar vem em
+// `connections` com o status, e os itens dela ficam de fora.
+const inbox = z.object({
+  syncedAt: z.string(),
+  items: z.array(
+    pullRequestCard.extend({
+      column: z.enum(['dependsOnMe', 'review', 'conflict', 'ready']),
+      project: projectRef,
+      connectionId: z.string(),
+      account: z.string(),
+    }),
+  ),
+  connections: z.array(
+    z.object({
+      id: z.string(),
+      provider: z.enum(['azure-devops', 'github']),
+      account: z.string(),
+      status: z.enum(['ok', 'expired', 'failed']),
+      reason: optional(z.string()),
+      expiredAt: optional(z.string()),
+      count: z.number(),
+      failedProjects: z.array(z.object({ project: z.string(), reason: z.string() })),
+      skippedProjects: z.number(),
+    }),
+  ),
+});
+export type Inbox = z.infer<typeof inbox>;
+export type InboxItem = Inbox['items'][number];
 
 const lanePullRequest = z.object({
   id: z.number(),
@@ -200,9 +255,12 @@ const repo = (projectId: string, repositoryId: string) =>
 export const api = {
   me: () => get('/api/me', me),
   logout: () => request('POST', '/auth/logout'),
-  setActiveSource: (provider: ProviderId) => request('POST', '/auth/active', { provider }),
+  setActiveConnection: (connectionId: string) => request('POST', '/auth/active', { connectionId }),
+  removeConnection: (connectionId: string) => request('DELETE', `/auth/connections/${encodeURIComponent(connectionId)}`),
   projects: () => get('/api/projects', z.array(projectView)),
   board: (projectId: string) => get(`/api/projects/${encodeURIComponent(projectId)}/board`, board),
+  allProjectsBoard: () => get('/api/board/all', allProjectsBoard),
+  inbox: () => get('/api/inbox', inbox),
   lanes: (projectId: string) =>
     get(`/api/projects/${encodeURIComponent(projectId)}/lanes`, releaseLanes),
   lane: (projectId: string, repositoryId: string) =>

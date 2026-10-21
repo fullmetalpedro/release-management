@@ -10,6 +10,7 @@ import type {
 import type { WorkTracking } from '../../core/ports/workTracking.ts';
 import { isHttpStatus, JsonClient, type FetchLike } from '../http-json.ts';
 import { msg } from '../../i18n.ts';
+import { writeAllowed } from '../writeProbe.ts';
 
 interface JiraIssueFields {
   summary: string;
@@ -133,6 +134,17 @@ export class JiraWorkTracking implements WorkTracking {
     if (!literal) return [];
     const issues = await this.search(`summary ~ "${literal}*" AND hierarchyLevel <= 0 ORDER BY updated DESC`, SEARCH_LIMIT);
     return issues.map((issue) => this.toWorkItem(issue));
+  }
+
+  // O token pode vincular PRs? Pede um link numa issue que não existe: com permissão, o Jira responde que a issue
+  // não existe; sem, recusa o pedido.
+  async probeWriteAccess(): Promise<boolean | undefined> {
+    return writeAllowed(() =>
+      this.client.json('/issue/RMPROBE-0/remotelink', {
+        method: 'POST',
+        body: { object: { url: 'https://release-management.invalid/probe', title: 'probe' } },
+      }),
+    );
   }
 
   async linkPullRequest(workItemId: number, ref: PullRequestRef): Promise<void> {

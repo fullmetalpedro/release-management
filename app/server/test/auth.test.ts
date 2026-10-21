@@ -2,17 +2,18 @@ import { constants, createCipheriv, createHash, createPublicKey, publicEncrypt, 
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AZURE_DEVOPS_SCOPE, EntraIdentityProvider } from '../src/adapters/entra/identityProvider.ts';
 import type { PatValidator } from '../src/adapters/http/patProviders.ts';
 import { buildServer } from '../src/adapters/http/server.ts';
 import { MemorySourceControl, MemoryWorkTracking } from '../src/adapters/memory/memoryAdapters.ts';
 import { createWorld } from '../src/adapters/memory/world.ts';
-import { SessionStore } from '../src/adapters/session/sessionStore.ts';
+import { connectionOf, SessionStore } from '../src/adapters/session/sessionStore.ts';
 import { loadConfig } from '../src/config.ts';
 import { NotAuthenticatedError } from '../src/core/domain/errors.ts';
 import type { IdentityProvider } from '../src/core/ports/identityProvider.ts';
-import { ConnectionRegistry } from '../src/registry.ts';
+import { ConnectionRegistry, expiringAs } from '../src/registry.ts';
+import type { WorkTracking } from '../src/core/ports/workTracking.ts';
 
 const entra = {
   tenantId: 'tenant-1',
@@ -96,7 +97,62 @@ describe('sessões', () => {
 
     expect(readFileSync(file).toString('latin1')).not.toMatch(/secreto|Alex/);
     expect(new SessionStore(secret, file).get(session.id)?.tokens?.refreshToken).toBe('rt-secreto');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(new SessionStore('y'.repeat(32), file).get(session.id)).toBeUndefined();
+    // Trocar o segredo invalida o arquivo, e isso aparece no log.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('SESSION_SECRET mudou'));
+    warn.mockRestore();
+  });
+
+  it('sem arquivo gravado é o primeiro boot: nada a avisar', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    new SessionStore('x'.repeat(32), join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc'));
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  describe('validade', () => {
+    afterEach(() => vi.useRealTimers());
+    const hours = (n: number) => n * 60 * 60 * 1000;
+    const days = (n: number) => n * hours(24);
+
+    it('vence depois de SESSION_MAX_AGE_DAYS sem uso', () => {
+      vi.useFakeTimers({ toFake: ['Date'], now: 0 });
+      const store = new SessionStore('x'.repeat(32), undefined, { maxAgeDays: 7 });
+      expect(store.maxAgeMs).toBe(days(7));
+      const session = store.create({ mode: 'demo', user: { name: 'Alex' } });
+      vi.setSystemTime(days(7) - 1);
+      expect(store.get(session.id)).toBeDefined();
+      vi.setSystemTime(days(7) + 1);
+      expect(store.get(session.id)).toBeUndefined();
+    });
+
+    it('cada uso renova a validade, gravando no máximo uma vez por hora', () => {
+      vi.useFakeTimers({ toFake: ['Date'], now: 0 });
+      const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
+      const secret = 'x'.repeat(32);
+      const store = new SessionStore(secret, file, { maxAgeDays: 7 });
+      const session = store.create({ mode: 'demo', user: { name: 'Alex' } });
+      const written = () => readFileSync(file).toString('base64');
+
+      const before = written();
+      vi.setSystemTime(hours(1) - 1);
+      expect(store.touch(session.id)).toBe(false);
+      expect(written()).toBe(before);
+
+      // Usando todo dia, passa dos 7 dias contados da criação sem ser deslogado.
+      for (let day = 1; day <= 20; day++) {
+        vi.setSystemTime(days(day));
+        expect(store.touch(session.id)).toBe(true);
+      }
+      expect(written()).not.toBe(before);
+      expect(new SessionStore(secret, file, { maxAgeDays: 7 }).get(session.id)?.lastSeenAt).toBe(days(20));
+
+      // Parado por mais de 7 dias, vence.
+      vi.setSystemTime(days(27) + 1);
+      expect(store.touch(session.id)).toBe(false);
+      expect(store.get(session.id)).toBeUndefined();
+    });
   });
 });
 
@@ -107,6 +163,11 @@ describe('configuração', () => {
     expect(loadConfig({ AUTH_MODE: 'demo' })).toMatchObject({ demo: true, organization: 'demo' });
     expect(loadConfig({ SESSION_SECRET: 'x'.repeat(32) }).sessionFile).toMatch(/sessions\.enc$/);
     expect(() => loadConfig({ SESSION_SECRET: 'curto' })).toThrow('32 caracteres');
+    expect(loadConfig({}).sessionMaxAgeDays).toBe(30);
+    expect(loadConfig({ SESSION_MAX_AGE_DAYS: '7' }).sessionMaxAgeDays).toBe(7);
+    expect(loadConfig({ AUTH_MODE: 'demo', SESSION_MAX_AGE_DAYS: '7' }).sessionMaxAgeDays).toBe(7);
+    expect(() => loadConfig({ SESSION_MAX_AGE_DAYS: '0' })).toThrow('SESSION_MAX_AGE_DAYS');
+    expect(() => loadConfig({ SESSION_MAX_AGE_DAYS: 'sete' })).toThrow('SESSION_MAX_AGE_DAYS');
     expect(() => loadConfig({ ENTRA_CLIENT_ID: 'c' })).toThrow('SESSION_SECRET');
     const config = loadConfig({
       ENTRA_CLIENT_ID: 'c',
@@ -246,16 +307,59 @@ describe('conexão por token pessoal', () => {
   const token = 'pat-' + 'a'.repeat(60);
   const alex = { id: 'u1', name: 'Alex Rivera', email: 'alex.rivera@example.com' };
 
-  async function patServer(validatePat: PatValidator = async () => ({ owner: alex })) {
+  async function patServer(validatePat: PatValidator = async () => ({ owner: alex }), extraEnv: NodeJS.ProcessEnv = {}) {
     const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
-    const config = { ...loadConfig(env), sessionFile: file };
-    const sessions = new SessionStore(config.sessionSecret, file);
-    // Os adapters reais chamariam os provedores; com uma plataforma ativa, os testes usam os de memória.
+    const config = { ...loadConfig({ ...env, ...extraEnv }), sessionFile: file };
+    const sessions = new SessionStore(config.sessionSecret, file, { maxAgeDays: config.sessionMaxAgeDays });
+    // Os adapters reais chamariam os provedores; com uma organização ativa, os testes usam os de memória. As contas
+    // em `rejected` têm o token recusado pelo provedor, como um PAT vencido.
     const registry = new ConnectionRegistry(config, sessions);
     const real = registry.for.bind(registry);
     const world = createWorld();
-    registry.for = (session) =>
-      session.activeSource ? { sourceControl: new MemorySourceControl(world), workTracking: new MemoryWorkTracking(world) } : real(session);
+    const rejected = new Set<string>();
+    // Contas com token só de leitura: leem normalmente, e o provedor recusa as escritas com 401.
+    const readOnly = new Set<string>();
+    const writes = new Set(['createReleaseBranch', 'linkPullRequest', 'unlinkPullRequest']);
+    const memory = <T extends object>(account: string, adapter: T): T => {
+      if (rejected.has(account)) return new Proxy(adapter, { get: () => async () => { throw new NotAuthenticatedError(); } });
+      if (readOnly.has(account)) {
+        return new Proxy(adapter, {
+          get: (object, property, receiver) =>
+            writes.has(String(property)) ? async () => { throw new NotAuthenticatedError(); } : Reflect.get(object, property, receiver),
+        });
+      }
+      return adapter;
+    };
+    registry.for = (session) => {
+      const id = session.activeConnection;
+      const active = connectionOf(session, id);
+      if (!id || !active) return real(session);
+      // Com o GitHub ativo, as tarefas vêm do Jira conectado, que também pode ter o token recusado.
+      const [jiraId, jira] = Object.entries(session.connections ?? {}).find(([, c]) => c.provider === 'jira') ?? [];
+      const sourceControl = memory(active.account, new MemorySourceControl(world));
+      const verify = () => sourceControl.listProjects();
+      let workTracking: WorkTracking = expiringAs(id, active, memory(active.account, new MemoryWorkTracking(world)), verify);
+      if (active.provider === 'github') {
+        const tracking = jiraId && jira ? memory(jira.account, new MemoryWorkTracking(world)) : undefined;
+        workTracking = tracking ? expiringAs(jiraId!, jira!, tracking, () => tracking.searchWorkItems('', 'x')) : new MemoryWorkTracking(world);
+      }
+      return { sourceControl: expiringAs(id, active, sourceControl, verify), workTracking };
+    };
+    registry.sources = (session) =>
+      Object.entries(session.connections ?? {})
+        .filter(([, connection]) => connection.provider !== 'jira')
+        .map(([id, connection]) => ({
+          id,
+          provider: connection.provider as 'azure-devops' | 'github',
+          account: connection.account,
+          expired: !!connection.expiredAt,
+          connection: connection.expiredAt
+            ? undefined
+            : {
+                sourceControl: expiringAs(id, connection, memory(connection.account, new MemorySourceControl(world))),
+                workTracking: new MemoryWorkTracking(world),
+              },
+        }));
     const app = await buildServer({ config, sessions, registry, webDist: '/nao-existe', validatePat });
     // O mesmo envelope que o navegador monta: chave AES embrulhada com RSA-OAEP | IV | { nonce, token } em AES-GCM.
     const encrypt = async (plain: string, reuse?: { nonce: string }) => {
@@ -275,7 +379,8 @@ describe('conexão por token pessoal', () => {
     const cookieOf = (response: { headers: Record<string, unknown> }) =>
       [response.headers['set-cookie']].flat().map(String).find((c) => /^rm_session=[^;]{20,}/.test(c))!.split(';')[0]!;
     const me = async (cookie: string) => (await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json();
-    return { app, sessions, file, encrypt, connect, cookieOf, me };
+    const sessionOf = (cookie: string) => sessions.get(decodeURIComponent(cookie).match(/rm_session=([^.]+)\./)![1])!;
+    return { app, sessions, file, encrypt, connect, cookieOf, me, rejected, readOnly, sessionOf };
   }
 
   it('está sempre disponível; sem app registration o login com Microsoft é anunciado como indisponível', async () => {
@@ -285,6 +390,7 @@ describe('conexão por token pessoal', () => {
       pat: true,
       demo: false,
       defaultOrganization: 'acme',
+      sessionsPersisted: true,
     });
     const login = await app.inject({ method: 'GET', url: '/auth/microsoft/login' });
     expect(login.headers.location).toBe('http://localhost:5173/login?erro=indisponivel');
@@ -302,7 +408,12 @@ describe('conexão por token pessoal', () => {
     const response = await connect('azure-devops', { organization: 'acme', encryptedToken });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ provider: 'azure-devops', account: 'acme', user: { name: 'Alex Rivera', email: 'alex.rivera@example.com' } });
+    expect(response.json()).toEqual({
+      id: 'azure-devops:acme',
+      provider: 'azure-devops',
+      account: 'acme',
+      user: { name: 'Alex Rivera', email: 'alex.rivera@example.com' },
+    });
     expect(response.body).not.toContain(token);
     expect(seen).toEqual([['azure-devops', 'acme', token]]);
 
@@ -317,7 +428,7 @@ describe('conexão por token pessoal', () => {
     });
     // Azure DevOps sempre primeiro na lista de contas.
     expect(profile.accounts).toEqual([
-      { provider: 'azure-devops', connected: true, active: true, handle: 'alex.rivera@example.com', account: 'acme' },
+      { id: 'azure-devops:acme', provider: 'azure-devops', connected: true, active: true, handle: 'alex.rivera@example.com', account: 'acme' },
       { provider: 'github', connected: false },
       { provider: 'jira', connected: false },
     ]);
@@ -328,7 +439,7 @@ describe('conexão por token pessoal', () => {
     const [, sessionId] = decodeURIComponent(cookie).match(/rm_session=([^.]+)\./)!;
     const stored = sessions.get(sessionId)!;
     expect(JSON.stringify(stored)).not.toContain(token);
-    expect(sessions.open(stored.connections!['azure-devops']!.sealedToken)).toBe(token);
+    expect(sessions.open(stored.connections!['azure-devops:acme']!.sealedToken)).toBe(token);
   });
 
   it('token recusado não cria sessão', async () => {
@@ -369,17 +480,22 @@ describe('conexão por token pessoal', () => {
 
     let profile = await me(cookie);
     expect(profile.accounts.map((a: { provider: string; connected: boolean; active?: boolean; account?: string }) => [a.provider, a.connected, a.active, a.account])).toEqual([
-      ['azure-devops', true, true, 'acme'],
-      ['github', true, false, 'acme-gh'],
+      ['azure-devops', true, false, 'acme'],
+      ['github', true, true, 'acme-gh'],
       ['jira', true, false, 'acme.atlassian.net'],
     ]);
-    expect(profile.source.provider).toBe('azure-devops');
+    // A organização recém-conectada passa a mostrar os PRs.
+    expect(profile.source.provider).toBe('github');
 
     const post = (body: object, headers: Record<string, string> = { 'x-requested-with': 'fetch' }) =>
       app.inject({ method: 'POST', url: '/auth/active', headers: { cookie, ...headers }, payload: body });
-    expect((await post({ provider: 'github' }, {})).statusCode).toBe(400);
-    expect((await post({ provider: 'jira' })).statusCode).toBe(400);
-    expect((await post({ provider: 'github' })).statusCode).toBe(204);
+    expect((await post({ connectionId: 'github:acme-gh' }, {})).statusCode).toBe(400);
+    expect((await post({ connectionId: 'jira:acme.atlassian.net' })).statusCode).toBe(400);
+    expect((await post({ connectionId: '__proto__' })).statusCode).toBe(400);
+    expect((await post({ provider: 'github' })).statusCode).toBe(400);
+    expect((await post({ connectionId: 'azure-devops:acme' })).statusCode).toBe(204);
+    expect((await me(cookie)).source.provider).toBe('azure-devops');
+    expect((await post({ connectionId: 'github:acme-gh' })).statusCode).toBe(204);
 
     profile = await me(cookie);
     expect(profile).toMatchObject({
@@ -390,15 +506,215 @@ describe('conexão por token pessoal', () => {
     });
   });
 
-  it('trocar o token de uma plataforma mantém a sessão e as outras conexões', async () => {
-    const { connect, encrypt, cookieOf, me } = await patServer();
-    const cookie = cookieOf(await connect('azure-devops', { organization: 'acme', encryptedToken: await encrypt(token) }));
-    await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }, { cookie });
-    await connect('azure-devops', { organization: 'outra-org', encryptedToken: await encrypt(token) }, { cookie });
+  it('várias organizações por plataforma ficam conectadas ao mesmo tempo', async () => {
+    const { app, connect, encrypt, cookieOf, me } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('azure-devops', { organization: 'fabrikam', encryptedToken: await encrypt(token) }, { cookie });
+    await connect('github', { organization: 'acme-labs', encryptedToken: await encrypt(token) }, { cookie });
+    await connect('github', { organization: 'globex', encryptedToken: await encrypt(token) }, { cookie });
+
+    let profile = await me(cookie);
+    // A última organização conectada passa a mostrar os PRs.
+    expect(profile.organization).toBe('globex');
+    expect(profile.accounts.map((a: { id?: string; active?: boolean }) => [a.id, a.active])).toEqual([
+      ['azure-devops:contoso', false],
+      ['azure-devops:fabrikam', false],
+      ['github:acme-labs', false],
+      ['github:globex', true],
+      [undefined, undefined],
+    ]);
+
+    const activate = (connectionId: string) =>
+      app.inject({ method: 'POST', url: '/auth/active', headers: { cookie, 'x-requested-with': 'fetch' }, payload: { connectionId } });
+    expect((await activate('azure-devops:fabrikam')).statusCode).toBe(204);
+    profile = await me(cookie);
+    expect(profile).toMatchObject({ organization: 'fabrikam', source: { provider: 'azure-devops' } });
+  });
+
+  it('reconectar uma organização troca só o token dela, sem mudar a ativa', async () => {
+    const { connect, encrypt, cookieOf, me, sessionOf, sessions } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('azure-devops', { organization: 'fabrikam', encryptedToken: await encrypt(token) }, { cookie });
+    const other = 'pat-' + 'b'.repeat(60);
+    // Organização não diferencia maiúsculas: é a mesma conexão.
+    await connect('azure-devops', { organization: 'Contoso', encryptedToken: await encrypt(other) }, { cookie });
 
     const profile = await me(cookie);
-    expect(profile.organization).toBe('outra-org');
+    expect(profile.organization).toBe('fabrikam');
     expect(profile.accounts.filter((a: { connected: boolean }) => a.connected)).toHaveLength(2);
+    expect(sessions.open(sessionOf(cookie).connections!['azure-devops:contoso']!.sealedToken)).toBe(other);
+  });
+
+  it('o Jira continua sendo um site por sessão', async () => {
+    const { connect, encrypt, cookieOf, me } = await patServer(async () => ({ owner: alex, cloudId: 'c1' }));
+    const cookie = cookieOf(await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }));
+    await connect('jira', { site: 'acme.atlassian.net', email: 'alex@example.com', encryptedToken: await encrypt(token) }, { cookie });
+    await connect('jira', { site: 'outra.atlassian.net', email: 'alex@example.com', encryptedToken: await encrypt(token) }, { cookie });
+    const jira = (await me(cookie)).accounts.filter((a: { provider: string }) => a.provider === 'jira');
+    expect(jira).toEqual([expect.objectContaining({ id: 'jira:outra.atlassian.net', active: false })]);
+  });
+
+  it('um token recusado derruba só a organização dele', async () => {
+    const { app, connect, encrypt, cookieOf, me, rejected } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('azure-devops', { organization: 'northwind', encryptedToken: await encrypt(token) }, { cookie });
+    rejected.add('northwind');
+
+    const board = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
+    expect(board.statusCode).toBe(401);
+    expect(board.json()).toMatchObject({ code: 'connection-expired', connectionId: 'azure-devops:northwind' });
+    expect(board.json().message).toContain('northwind');
+    expect(board.headers['set-cookie']).toBeUndefined();
+
+    // A sessão continua: o menu de contas abre e mostra qual organização pede reconexão.
+    let profile = await me(cookie);
+    const northwind = profile.accounts.find((a: { id?: string }) => a.id === 'azure-devops:northwind');
+    expect(northwind).toMatchObject({ active: true, expiredAt: expect.any(String) });
+
+    // Não dá para voltar a uma organização expirada sem reconectar; as outras seguem valendo.
+    const activate = (connectionId: string) =>
+      app.inject({ method: 'POST', url: '/auth/active', headers: { cookie, 'x-requested-with': 'fetch' }, payload: { connectionId } });
+    expect((await activate('azure-devops:contoso')).statusCode).toBe(204);
+    expect((await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } })).statusCode).toBe(200);
+    expect((await activate('azure-devops:northwind')).statusCode).toBe(400);
+
+    // Reconectar limpa a expiração, sem trocar a organização ativa.
+    rejected.delete('northwind');
+    await connect('azure-devops', { organization: 'northwind', encryptedToken: await encrypt(token) }, { cookie });
+    profile = await me(cookie);
+    expect(profile.organization).toBe('contoso');
+    expect(profile.accounts.find((a: { id?: string }) => a.id === 'azure-devops:northwind').expiredAt).toBeUndefined();
+  });
+
+  it('um 401 do Jira, com o GitHub ativo, não desloga do GitHub', async () => {
+    const { app, connect, encrypt, cookieOf, me, rejected } = await patServer(async () => ({ owner: alex, cloudId: 'c1' }));
+    const cookie = cookieOf(await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }));
+    await connect('jira', { site: 'acme.atlassian.net', email: 'alex@example.com', encryptedToken: await encrypt(token) }, { cookie });
+    rejected.add('acme.atlassian.net');
+
+    const search = await app.inject({ method: 'GET', url: '/api/projects/p-invoicing/work-items?q=login', headers: { cookie } });
+    expect(search.statusCode).toBe(401);
+    expect(search.json()).toMatchObject({ code: 'connection-expired', connectionId: 'jira:acme.atlassian.net' });
+    expect(search.headers['set-cookie']).toBeUndefined();
+
+    // O GitHub segue ativo e funcionando; o Jira aparece pedindo reconexão e deixa de fornecer as tarefas.
+    expect((await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } })).statusCode).toBe(200);
+    const profile = await me(cookie);
+    expect(profile).toMatchObject({ source: { provider: 'github' }, tracker: null });
+    expect(profile.accounts.find((a: { id?: string }) => a.id === 'jira:acme.atlassian.net')).toMatchObject({ expiredAt: expect.any(String) });
+  });
+
+  it('a caixa de entrada junta as organizações; uma recusada vira aviso e fica expirada', async () => {
+    const { app, connect, encrypt, cookieOf, me, rejected } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }, { cookie });
+    rejected.add('acme-gh');
+
+    const response = await app.inject({ method: 'GET', url: '/api/inbox', headers: { cookie } });
+    expect(response.statusCode).toBe(200);
+    const inbox = response.json();
+    expect(inbox.connections.map((c: { account: string; status: string }) => [c.account, c.status])).toEqual([
+      ['contoso', 'ok'],
+      ['acme-gh', 'expired'],
+    ]);
+    expect(inbox.connections[1].expiredAt).toEqual(expect.any(String));
+    expect(inbox.items.length).toBeGreaterThan(0);
+    expect(inbox.items.every((item: { account: string; column: string }) => item.account === 'contoso' && item.column === 'dependsOnMe')).toBe(true);
+    // A recusa marcou a organização, sem derrubar a sessão.
+    const profile = await me(cookie);
+    expect(profile.accounts.find((a: { id?: string }) => a.id === 'github:acme-gh').expiredAt).toEqual(expect.any(String));
+  });
+
+  it('token só de leitura: criar release é recusado sem expirar a organização', async () => {
+    const { app, connect, encrypt, cookieOf, me, readOnly } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    readOnly.add('contoso');
+    expect((await me(cookie)).capabilities).toEqual({ createRelease: true, linkWorkItems: true });
+
+    const [project] = (await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } })).json();
+    const { lanes } = (await app.inject({ method: 'GET', url: `/api/projects/${project.id}/lanes`, headers: { cookie } })).json();
+    const lane = lanes.find((candidate: { merged: unknown[] }) => candidate.merged.length > 0);
+    const create = () =>
+      app.inject({
+        method: 'POST',
+        url: `/api/projects/${project.id}/repositories/${lane.repository.id}/releases`,
+        headers: { cookie, 'x-requested-with': 'fetch' },
+        payload: { name: 'release/99.0', pullRequestIds: [lane.merged[0].id] },
+      });
+
+    const refused = await create();
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toMatchObject({ code: 'read-only', capability: 'createRelease', connectionId: 'azure-devops:contoso' });
+    expect(refused.json().message).toContain('contoso');
+
+    // A organização continua valendo: só criar release fica desabilitado.
+    const profile = await me(cookie);
+    expect(profile.capabilities).toEqual({ createRelease: false, linkWorkItems: true });
+    expect(profile.accounts[0]).toMatchObject({ id: 'azure-devops:contoso', denied: ['createRelease'] });
+    expect(profile.accounts[0].expiredAt).toBeUndefined();
+    expect((await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } })).statusCode).toBe(200);
+    // Da segunda vez, nem chama o provedor.
+    readOnly.delete('contoso');
+    expect((await create()).statusCode).toBe(403);
+  });
+
+  it('as escritas negadas na conexão já desabilitam a ação, antes de chamar o provedor', async () => {
+    const { app, connect, encrypt, cookieOf, me } = await patServer(async () => ({ owner: alex, denied: ['linkWorkItems'] }));
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    expect((await me(cookie)).capabilities).toEqual({ createRelease: true, linkWorkItems: false });
+    const link = await app.inject({
+      method: 'PUT',
+      url: '/api/projects/p1/repositories/r1/pull-requests/1/work-items/2',
+      headers: { cookie, 'x-requested-with': 'fetch' },
+    });
+    expect(link.statusCode).toBe(403);
+    expect(link.json()).toMatchObject({ code: 'read-only', capability: 'linkWorkItems' });
+    // Reconectar com um token que escreve libera a ação.
+    await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }, { cookie });
+  });
+
+  it('numa escrita, um token vencido de verdade continua expirando a organização', async () => {
+    const { app, connect, encrypt, cookieOf, rejected } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('azure-devops', { organization: 'fabrikam', encryptedToken: await encrypt(token) }, { cookie });
+    rejected.add('fabrikam');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/p1/repositories/r1/releases',
+      headers: { cookie, 'x-requested-with': 'fetch' },
+      payload: { name: 'release/99.0', pullRequestIds: [1] },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ code: 'connection-expired', connectionId: 'azure-devops:fabrikam' });
+  });
+
+  it('a sessão só acaba quando nenhuma organização sobra válida', async () => {
+    const { app, connect, encrypt, cookieOf, rejected } = await patServer();
+    const cookie = cookieOf(await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }));
+    rejected.add('acme-gh');
+    const response = await app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
+    expect(response.statusCode).toBe(401);
+    expect(response.json().code).toBe('unauthenticated');
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(401);
+  });
+
+  it('remove uma organização; se era a ativa, outra assume', async () => {
+    const { app, connect, encrypt, cookieOf, me } = await patServer();
+    const cookie = cookieOf(await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) }));
+    await connect('github', { organization: 'acme-gh', encryptedToken: await encrypt(token) }, { cookie });
+    const remove = (id: string, headers: Record<string, string> = { 'x-requested-with': 'fetch' }) =>
+      app.inject({ method: 'DELETE', url: `/auth/connections/${encodeURIComponent(id)}`, headers: { cookie, ...headers } });
+
+    expect((await remove('github:acme-gh', {})).statusCode).toBe(400);
+    expect((await remove('__proto__')).statusCode).toBe(404);
+    expect((await remove('github:acme-gh')).statusCode).toBe(204);
+    expect(await me(cookie)).toMatchObject({ organization: 'contoso', source: { provider: 'azure-devops' } });
+
+    // Sem nenhuma conexão, a sessão acaba.
+    const last = await remove('azure-devops:contoso');
+    expect(last.statusCode).toBe(204);
+    expect(String(last.headers['set-cookie'])).toMatch(/rm_session=;/);
+    expect((await app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(401);
   });
 
   it('só o Jira conectado não basta para abrir o board', async () => {
@@ -410,6 +726,45 @@ describe('conexão por token pessoal', () => {
     expect(projects.json().message).toContain('Azure DevOps ou o GitHub');
   });
 
+  it('SESSION_MAX_AGE_DAYS vale para o cookie, e o uso renova a sessão e o cookie', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.UTC(2026, 0, 1) });
+    try {
+      const { app, connect, encrypt, cookieOf, sessionOf } = await patServer(undefined, { SESSION_MAX_AGE_DAYS: '7' });
+      const login = await connect('azure-devops', { organization: 'contoso', encryptedToken: await encrypt(token) });
+      expect(String(login.headers['set-cookie'])).toMatch(/Max-Age=604800/);
+      const cookie = cookieOf(login);
+      const projects = () => app.inject({ method: 'GET', url: '/api/projects', headers: { cookie } });
+      const day = 24 * 60 * 60 * 1000;
+
+      // Dentro da mesma hora o cookie não é reenviado.
+      expect((await projects()).headers['set-cookie']).toBeUndefined();
+
+      // Seis dias depois, ainda válida: o uso estende a sessão por mais 7 dias e reenvia o cookie.
+      vi.setSystemTime(Date.now() + 6 * day);
+      const renewed = await projects();
+      expect(renewed.statusCode).toBe(200);
+      expect(String(renewed.headers['set-cookie'])).toMatch(/^rm_session=[^;]{20,};.*Max-Age=604800/);
+      expect(sessionOf(cookie).lastSeenAt).toBe(Date.now());
+
+      // Mais seis dias: 12 desde a entrada, mas só 6 desde o último uso.
+      vi.setSystemTime(Date.now() + 6 * day);
+      expect((await projects()).statusCode).toBe(200);
+
+      // Oito dias parado: vence.
+      vi.setSystemTime(Date.now() + 8 * day);
+      expect((await projects()).statusCode).toBe(401);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sem SESSION_SECRET o /auth/mode avisa que as sessões não são persistidas', async () => {
+    const config = loadConfig({ AZDO_ORG: 'acme' });
+    const sessions = new SessionStore(config.sessionSecret, config.sessionFile);
+    const app = await buildServer({ config, sessions, registry: new ConnectionRegistry(config, sessions), webDist: '/nao-existe' });
+    expect((await app.inject({ method: 'GET', url: '/auth/mode' })).json()).toMatchObject({ sessionsPersisted: false });
+  });
+
   it('sessão gravada no formato antigo continua valendo', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
     const secret = 'x'.repeat(32);
@@ -417,8 +772,33 @@ describe('conexão por token pessoal', () => {
     const session = store.create({ mode: 'pat', user: { name: 'Alex' }, ...({ pat: { organization: 'acme', sealedToken: store.seal(token) } } as object) });
 
     const reloaded = new SessionStore(secret, file).get(session.id)!;
-    expect(reloaded.activeSource).toBe('azure-devops');
-    expect(reloaded.connections!['azure-devops']!.account).toBe('acme');
-    expect(store.open(reloaded.connections!['azure-devops']!.sealedToken)).toBe(token);
+    expect(reloaded.activeConnection).toBe('azure-devops:acme');
+    expect(reloaded.connections!['azure-devops:acme']).toMatchObject({ provider: 'azure-devops', account: 'acme' });
+    expect(store.open(reloaded.connections!['azure-devops:acme']!.sealedToken)).toBe(token);
+  });
+
+  it('sessão gravada com uma conexão por plataforma vira o mapa por organização', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'rm-')), 'sessions.enc');
+    const secret = 'x'.repeat(32);
+    const store = new SessionStore(secret, file);
+    const sealedToken = store.seal(token);
+    const session = store.create({
+      mode: 'pat',
+      user: { name: 'Alex' },
+      ...({
+        connections: {
+          'azure-devops': { account: 'Contoso', sealedToken },
+          github: { account: 'acme-labs', sealedToken, handle: 'alex' },
+          jira: { account: 'acme.atlassian.net', sealedToken, email: 'alex@example.com', cloudId: 'c1' },
+        },
+        activeSource: 'github',
+      } as object),
+    });
+
+    const reloaded = new SessionStore(secret, file).get(session.id)!;
+    expect(Object.keys(reloaded.connections!)).toEqual(['azure-devops:contoso', 'github:acme-labs', 'jira:acme.atlassian.net']);
+    expect(reloaded.connections!['github:acme-labs']).toMatchObject({ provider: 'github', account: 'acme-labs', handle: 'alex' });
+    expect(reloaded.activeConnection).toBe('github:acme-labs');
+    expect('activeSource' in reloaded).toBe(false);
   });
 });

@@ -71,5 +71,5 @@ export async function connectPlatform(provider: ProviderId, account: PlatformAcc
   if (!response.ok) {
     throw new ApiError(response.status, payload.code ?? 'error', payload.message ?? t('errors.http', { status: response.status }));
   }
-  return payload as { provider: ProviderId; account: string; user: { name: string; email?: string } };
+  return payload as { id: string; provider: ProviderId; account: string; user: { name: string; email?: string } };
 }

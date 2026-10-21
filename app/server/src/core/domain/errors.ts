@@ -20,6 +20,30 @@ export class NotAuthenticatedError extends LocalizedError {
   }
 }
 
+// Modo token: o provedor recusou o token de uma organização. Só aquela conexão cai; a sessão continua.
+export class ConnectionExpiredError extends LocalizedError {
+  constructor(
+    public readonly connectionId: string,
+    public readonly account: string,
+  ) {
+    super(msg('connectionExpired', { account }));
+    this.name = 'ConnectionExpiredError';
+  }
+}
+
+// O token lê, mas não tem permissão para esta escrita (token só de leitura). A conexão continua valendo; só a ação
+// fica desabilitada.
+export class WriteNotAllowedError extends LocalizedError {
+  constructor(
+    public readonly connectionId: string,
+    public readonly account: string,
+    public readonly capability: 'createRelease' | 'linkWorkItems',
+  ) {
+    super(msg(capability === 'createRelease' ? 'readOnlyRelease' : 'readOnlyLink', { account }));
+    this.name = 'WriteNotAllowedError';
+  }
+}
+
 // O provedor não respondeu ou respondeu com erro: o board mostra o banner de sincronização.
 export class ProviderUnavailableError extends LocalizedError {
   constructor(

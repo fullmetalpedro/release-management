@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowDownWideNarrow } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -6,7 +7,9 @@ import {
   ColumnSlot,
   useColumnSlots,
   OpenColumn,
+  PerRepositoryPlaceholder,
   ReviewerScopeToggle,
+  WaitingMax,
   type ColumnId,
   type ReviewerScope,
 } from '../components/board';
@@ -17,17 +20,23 @@ import {
   AuthorIcon,
   ColumnsDropdown,
   FilterSelect,
+  NewPrNotifyOption,
   ProjectSwitcher,
   SearchBox,
   SyncControls,
   TargetIcon,
 } from '../components/toolbar';
 import { TopBar } from '../components/TopBar';
-import { api, ApiError, type BoardColumnId, type PullRequestCard } from '../lib/api';
-import { elapsedLabel, useNow, useStoredState } from '../lib/format';
-import { LANE_STALE_MS, laneKey, SYNC_INTERVAL_MS, useAllLanes } from '../lib/lanes';
-import { useSession } from '../lib/session';
+import { TriangleAlert } from 'lucide-react';
+import { api, ApiError, type AllProjectsBoard, type Board, type BoardColumnId, type PullRequestCard } from '../lib/api';
+import { useNow, useStoredState } from '../lib/format';
+import { LANE_STALE_MS, laneKey, useAllLanes } from '../lib/lanes';
+import { showBrowserNotification, useNewPrNotifications, useNewPrs } from '../lib/newPrs';
+import { autoSync, useSyncInterval } from '../lib/sync';
+import { ALL_PROJECTS, useSession } from '../lib/session';
 import { t } from '../lib/i18n';
+import { rem } from '../lib/units';
+import { sortCards, STALE_DAYS, WAITING_COLUMNS, waitingBand, type SortOrder } from '../lib/waiting';
 
 const OPEN_COLUMNS: BoardColumnId[] = ['dependsOnMe', 'review', 'conflict', 'ready'];
 
@@ -45,10 +54,33 @@ const isColorChoice = (value: unknown): value is Record<string, Record<string, s
   isRecord(value) && Object.values(value).every((colors) => isRecord(colors) && Object.values(colors).every(isHexColor));
 const isColorList = (value: unknown): value is string[] => Array.isArray(value) && value.every(isHexColor);
 const isReviewerScope = (value: unknown): value is ReviewerScope => value === 'all' || value === 'required';
+const isSortOrder = (value: unknown): value is SortOrder => value === 'provider' || value === 'oldest';
+
+// O board de todos os projetos no formato do board de um projeto: os cards por coluna e os repositórios que aparecem
+// neles (com o projeto de cada um, para guardar a cor no projeto certo).
+function fromAllProjects(data: AllProjectsBoard): Board & { projectOf: Map<string, string> } {
+  const columns: Board['columns'] = { dependsOnMe: [], review: [], conflict: [], ready: [] };
+  const repositories = new Map<string, { id: string; name: string }>();
+  const projectOf = new Map<string, string>();
+  for (const { column, ...card } of data.items) {
+    columns[column].push(card);
+    repositories.set(card.repository.id, card.repository);
+    projectOf.set(card.repository.id, card.project.id);
+  }
+  return {
+    syncedAt: data.syncedAt,
+    columns,
+    repositories: [...repositories.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    projectOf,
+  };
+}
 
 export function BoardPage() {
-  const { me, project, projects, projectsLoading, selectProject } = useSession();
-  const projectId = project?.id;
+  const { me, project, allProjects, projects, projectsLoading, selectProject } = useSession();
+  // Com "Todos os projetos" não há projeto: raias, cores e criação de release ficam desligadas.
+  const projectId = allProjects ? undefined : project?.id;
+  const boardKey = allProjects ? ALL_PROJECTS : projectId;
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const now = useNow();
   const toast = useToast();
   const navigate = useNavigate();
@@ -62,14 +94,10 @@ export function BoardPage() {
   const [hidden, setHidden] = useStoredState<ColumnId[]>('rm.hiddenColumns', [], isColumnList);
   const [laneRepos, setLaneRepos] = useStoredState<Record<string, { merged?: string; release?: string }>>('rm.laneRepos', {}, isLaneChoice);
   const [reviewerScope, setReviewerScope] = useStoredState<ReviewerScope>('rm.reviewerScope', 'all', isReviewerScope);
+  const [sortOrder, setSortOrder] = useStoredState<SortOrder>('rm.sortOrder', 'provider', isSortOrder);
   const [colorChoices, setColorChoices] = useStoredState<Record<string, Record<string, string>>>('rm.repoColors', {}, isColorChoice);
   const [customColors, setCustomColors] = useStoredState<string[]>('rm.customColors', [], isColorList);
-  const repositoryColors = (projectId && colorChoices[projectId]) || {};
-  const setRepositoryColor = (repositoryId: string, hex: string | null) => {
-    if (!projectId) return;
-    const { [repositoryId]: _previous, ...others } = repositoryColors;
-    setColorChoices({ ...colorChoices, [projectId]: hex ? { ...others, [repositoryId]: hex } : others });
-  };
+  const [syncInterval, setSyncInterval] = useSyncInterval();
   const [createState, setCreateState] = useState<CreateState>({ status: 'idle' });
   const [justCreated, setJustCreated] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -81,18 +109,44 @@ export function BoardPage() {
     // "Você" vale em qualquer projeto; um colega escolhido pelo nome pode nem existir no outro.
     setAuthorFilter((current) => (current === AUTHOR_ME ? current : null));
     setCreateState({ status: 'idle' });
-  }, [projectId]);
+  }, [boardKey]);
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
 
-  const board = useQuery({
+  const singleBoard = useQuery({
     queryKey: ['board', projectId],
     queryFn: () => api.board(projectId!),
     enabled: !!projectId,
-    refetchInterval: SYNC_INTERVAL_MS,
+    ...autoSync(syncInterval, 30_000),
     retry: false,
   });
+  const allBoard = useQuery({
+    queryKey: ['board', ALL_PROJECTS],
+    queryFn: api.allProjectsBoard,
+    enabled: allProjects,
+    ...autoSync(syncInterval, 30_000),
+    retry: false,
+  });
+  const board = allProjects ? allBoard : singleBoard;
+  const all = useMemo(() => (allBoard.data ? fromAllProjects(allBoard.data) : undefined), [allBoard.data]);
+  const boardData: Board | undefined = allProjects ? all : singleBoard.data;
 
-  const repositories = board.data?.repositories ?? [];
+  // Com todos os projetos, cada repositório leva a cor guardada no próprio projeto.
+  const colorProjectOf = (repositoryId: string) => (allProjects ? all?.projectOf.get(repositoryId) : projectId);
+  const repositoryColors = useMemo<Record<string, string>>(
+    () =>
+      allProjects
+        ? Object.assign({}, ...(allBoard.data?.projects ?? []).map((p) => colorChoices[p.id] ?? {}))
+        : (projectId && colorChoices[projectId]) || {},
+    [allProjects, allBoard.data, colorChoices, projectId],
+  );
+  const setRepositoryColor = (repositoryId: string, hex: string | null) => {
+    const owner = colorProjectOf(repositoryId);
+    if (!owner) return;
+    const { [repositoryId]: _previous, ...others } = colorChoices[owner] ?? {};
+    setColorChoices({ ...colorChoices, [owner]: hex ? { ...others, [repositoryId]: hex } : others });
+  };
+
+  const repositories = boardData?.repositories ?? [];
   const repositoryFilter = useMemo(
     () => chosenRepositories.filter((id) => repositories.some((repository) => repository.id === id)),
     [chosenRepositories, repositories],
@@ -161,12 +215,13 @@ export function BoardPage() {
         description: conflict
           ? t('board.conflictBody', { id: conflictingId, base: String(error.details.baseBranch) })
           : error.message,
-        action: { label: t('common.retry'), onClick: () => create.mutate(input) },
+        // Token só de leitura: tentar de novo daria no mesmo.
+        action: error instanceof ApiError && error.code === 'read-only' ? undefined : { label: t('common.retry'), onClick: () => create.mutate(input) },
       });
     },
   });
 
-  const allOpen = useMemo(() => OPEN_COLUMNS.flatMap((id) => board.data?.columns[id] ?? []), [board.data]);
+  const allOpen = useMemo(() => OPEN_COLUMNS.flatMap((id) => boardData?.columns[id] ?? []), [boardData]);
   const targets = useMemo(
     () => [...new Set(allOpen.map((pr) => pr.targetBranch))].sort().map((name) => ({ id: name, name })),
     [allOpen],
@@ -198,8 +253,10 @@ export function BoardPage() {
         `#${pr.id}`.includes(term) ||
         pr.author.name.toLowerCase().includes(term) ||
         (pr.author.isMe && t('common.you').toLowerCase().includes(term)));
-    const columns = board.data?.columns;
-    const result = Object.fromEntries(OPEN_COLUMNS.map((id) => [id, (columns?.[id] ?? []).filter(matches)])) as Record<
+    const columns = boardData?.columns;
+    const result = Object.fromEntries(
+      OPEN_COLUMNS.map((id) => [id, sortCards((columns?.[id] ?? []).filter(matches), sortOrder)]),
+    ) as Record<
       BoardColumnId,
       PullRequestCard[]
     >;
@@ -208,25 +265,56 @@ export function BoardPage() {
       result.dependsOnMe = result.dependsOnMe.filter((pr) => pr.reason !== 'reviewer' || pr.requiredReviewer);
     }
     return result;
-  }, [board.data, authorFilter, repositoryFilter, targetFilter, search, reviewerScope]);
+  }, [boardData, authorFilter, repositoryFilter, targetFilter, search, reviewerScope, sortOrder]);
 
-  const dependsOnMe = (board.data?.columns.dependsOnMe ?? []).filter(
-    (pr) => reviewerScope === 'all' || pr.reason !== 'reviewer' || pr.requiredReviewer,
+  const countsForMe = (pr: PullRequestCard) => reviewerScope === 'all' || pr.reason !== 'reviewer' || pr.requiredReviewer;
+  const myCards = (boardData?.columns.dependsOnMe ?? []).filter(countsForMe);
+  const dependsOnMe = myCards.length;
+  // PRs parados (na faixa vermelha) nas colunas de espera, como o resto do subtítulo: sem os filtros da toolbar.
+  const stale = WAITING_COLUMNS.flatMap((id) => (id === 'dependsOnMe' ? myCards : (boardData?.columns[id] ?? []))).filter(
+    (pr) => waitingBand(pr.waitingSince, now) === 'stale',
   ).length;
+
+  // PR novo em "Depende de mim" depois de um sync: toast, badge Novo e, com o opt-in, aviso do navegador.
+  const notifications = useNewPrNotifications();
+  const showNewPrs = () => {
+    if (hidden.includes('dependsOnMe')) setHidden(hidden.filter((id) => id !== 'dependsOnMe'));
+    // Depois de a coluna voltar a aparecer.
+    requestAnimationFrame(() =>
+      boardRef.current?.querySelector('[data-fresh]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' }),
+    );
+  };
+  const { fresh, opened } = useNewPrs({
+    me,
+    projectId,
+    board: boardData,
+    updatedAt: board.dataUpdatedAt,
+    counts: countsForMe,
+    waiting: dependsOnMe,
+    notify: notifications.enabled,
+    onNew: (prs, notifyBrowser) => {
+      const title = t('newPrs.title', { count: prs.length });
+      const items = prs.slice(0, 3).map((pr) => `#${pr.id} ${pr.title}`);
+      if (prs.length > 3) items.push(t('newPrs.more', { count: prs.length - 3 }));
+      toast.show({ kind: 'info', title, items, action: { label: t('newPrs.viewOnBoard'), onClick: showNewPrs } });
+      if (notifyBrowser) showBrowserNotification(title, items.join('\n'), showNewPrs);
+    },
+  });
   const optionalHidden =
     reviewerScope === 'required' &&
-    (board.data?.columns.dependsOnMe ?? []).some((pr) => pr.reason === 'reviewer' && !pr.requiredReviewer);
+    (boardData?.columns.dependsOnMe ?? []).some((pr) => pr.reason === 'reviewer' && !pr.requiredReviewer);
   const isFiltered =
     repositoryFilter.length > 0 || !!targetFilter || !!authorFilter || search.trim() !== '';
 
   // Sem projeto a consulta do board nem começa: não há o que esperar.
-  const loading = !board.data && !board.isError && (projectsLoading || (!!projectId && board.isPending));
+  const loading = !boardData && !board.isError && (projectsLoading || (!!boardKey && board.isPending));
   const syncing = board.isFetching || allLanes.isFetching || mergedLane.isFetching || releaseLane.isFetching;
   const mergedFailed = !mergedLane.data && (mergedLane.isError || (allLanes.isError && !mergedLane.isFetching));
   const releaseFailed = !releaseLane.data && (releaseLane.isError || (allLanes.isError && !releaseLane.isFetching));
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['projects'] });
     void board.refetch();
+    if (allProjects) return;
     // O lote semeia as raias de cada repositório; as que falharam nele são buscadas de novo uma a uma.
     void allLanes.refetch().then(() => {
       if (mergedLane.isError) void mergedLane.refetch();
@@ -234,7 +322,7 @@ export function BoardPage() {
     });
   };
 
-  const counts: Partial<Record<ColumnId, number>> = board.data
+  const counts: Partial<Record<ColumnId, number>> = boardData
     ? {
         ...Object.fromEntries(OPEN_COLUMNS.map((id) => [id, filtered[id].length])),
         merged: mergedLane.data?.merged.length,
@@ -243,7 +331,12 @@ export function BoardPage() {
     : {};
   const show = (id: ColumnId) => !hidden.includes(id);
   const boardRef = useRef<HTMLElement>(null);
-  useColumnSlots(boardRef, COLUMNS.filter((column) => show(column.id)).map((column) => column.id).join());
+  // Mergeados e Release dependem de um repositório: com todos os projetos, um aviso fica no lugar delas.
+  const boardColumns = allProjects ? COLUMNS.filter((column) => OPEN_COLUMNS.some((id) => id === column.id)) : COLUMNS;
+  useColumnSlots(boardRef, boardColumns.filter((column) => show(column.id)).map((column) => column.id).join());
+  const chooseProject = () => setSwitcherOpen(true);
+  const failedProjects = allProjects ? (allBoard.data?.failed ?? []) : [];
+  const skippedProjects = allProjects ? (allBoard.data?.skipped ?? 0) : 0;
 
   const renderColumn = (column: (typeof COLUMNS)[number]) => {
     if (column.id === 'merged') {
@@ -263,6 +356,7 @@ export function BoardPage() {
           failed={mergedFailed}
           state={createState}
           onSelectionChange={() => createState.status === 'failed' && setCreateState({ status: 'idle' })}
+          readOnly={!me.capabilities.createRelease}
           onCreate={(name, pullRequestIds) => {
             if (!projectId || !mergedRepo || creating.current) return;
             creating.current = true;
@@ -290,8 +384,10 @@ export function BoardPage() {
         id={column.id}
         cards={filtered[column.id]}
         repositoryColors={repositoryColors}
+        fresh={column.id === 'dependsOnMe' ? fresh : undefined}
+        onOpen={column.id === 'dependsOnMe' ? opened : undefined}
         loading={loading}
-        emptyState={!!board.data && !isFiltered && !(column.id === 'dependsOnMe' && optionalHidden)}
+        emptyState={!!boardData && !isFiltered && !(column.id === 'dependsOnMe' && optionalHidden)}
         filtered={isFiltered || (column.id === 'dependsOnMe' && optionalHidden)}
         emptyNote={
           column.id === 'dependsOnMe' && optionalHidden && !isFiltered
@@ -303,6 +399,7 @@ export function BoardPage() {
             <ReviewerScopeToggle value={reviewerScope} onChange={setReviewerScope} />
           ) : undefined
         }
+        headerAction={column.id === 'dependsOnMe' ? <WaitingMax cards={filtered.dependsOnMe} now={now} /> : undefined}
         now={now}
       />
     );
@@ -314,10 +411,19 @@ export function BoardPage() {
 
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 px-8 pb-5 pt-7">
         <div className="flex flex-col gap-2.5">
-          <ProjectSwitcher projects={projects} current={project} loading={projectsLoading} onSelect={selectProject} />
+          <ProjectSwitcher
+            projects={projects}
+            current={project}
+            loading={projectsLoading}
+            onSelect={selectProject}
+            allProjects={allProjects}
+            open={switcherOpen}
+            onOpenChange={setSwitcherOpen}
+            organization={me.accounts.filter((account) => account.connected && account.provider !== 'jira').length > 1 ? me.organization : undefined}
+          />
           <h1 className="text-2xl font-bold tracking-[-0.3px] text-ink">{t('board.title')}</h1>
           <div className="flex h-4 items-center gap-2 text-[0.8125rem]">
-            {loading || !board.data ? null : (
+            {loading || !boardData ? null : (
               <>
                 <span className="font-medium text-ink-2">
                   {t('board.openPrs', { count: allOpen.length })}
@@ -329,6 +435,12 @@ export function BoardPage() {
                   </span>
                 ) : (
                   <span className="font-semibold text-[#16A34A]">{t('board.nothingOnYou')}</span>
+                )}
+                {stale > 0 && (
+                  <>
+                    <span className="text-[#CBD5E1]">·</span>
+                    <span className="font-semibold text-[#DC2626]">{t('waiting.stale', { count: stale, days: STALE_DAYS })}</span>
+                  </>
                 )}
               </>
             )}
@@ -365,27 +477,86 @@ export function BoardPage() {
             value={targetFilter}
             onChange={setTargetFilter}
           />
-          <ColumnsDropdown hidden={hidden} counts={counts} onChange={setHidden} />
+          <FilterSelect
+            icon={ArrowDownWideNarrow}
+            label={t('waiting.sort')}
+            allLabel={t('waiting.sortProvider')}
+            options={[{ id: 'oldest', name: t('waiting.sortOldest') }]}
+            value={sortOrder === 'oldest' ? 'oldest' : null}
+            onChange={(value) => setSortOrder(value === 'oldest' ? 'oldest' : 'provider')}
+            plain
+          />
+          <ColumnsDropdown hidden={hidden} counts={counts} onChange={setHidden} columns={boardColumns} />
           <SearchBox value={search} onChange={setSearch} />
           <SyncControls
             syncing={syncing}
             failed={board.isError || mergedFailed || releaseFailed}
-            lastSync={board.data && elapsedLabel(board.data.syncedAt, now)}
+            syncedAt={boardData?.syncedAt}
+            updatedAt={board.dataUpdatedAt}
+            interval={syncInterval}
+            onIntervalChange={setSyncInterval}
             onRefresh={refresh}
+            menuExtra={
+              <NewPrNotifyOption
+                checked={notifications.enabled}
+                permission={notifications.permission}
+                onChange={(next) => void notifications.toggle(next)}
+              />
+            }
           />
         </div>
       </div>
+
+      {(failedProjects.length > 0 || skippedProjects > 0) && (
+        <div className="flex flex-col gap-2 px-8 pb-4">
+          {failedProjects.map(({ project: failed, reason }) => (
+            <Notice
+              key={failed.id}
+              text={t('board.projectFailed', { project: failed.name, reason })}
+              action={t('board.tryAgain')}
+              onAction={() => void allBoard.refetch()}
+              busy={allBoard.isFetching}
+            />
+          ))}
+          {skippedProjects > 0 && (
+            <Notice
+              text={t('board.tooManyProjects', { count: skippedProjects, limit: allBoard.data?.projects.length ?? 0 })}
+              action={t('board.chooseProject')}
+              onAction={chooseProject}
+            />
+          )}
+        </div>
+      )}
 
       {/* O board não rola na vertical: cada coluna cuida do próprio conteúdo. */}
       {/* O respiro de 2px no topo deixa inteiro o contorno de 2px das colunas destacadas (o board corta o que passa da borda). */}
       <main ref={boardRef} className="column-scroll flex min-h-0 flex-1 items-start gap-4 overflow-x-auto overflow-y-hidden px-8 pb-8 pt-0.5">
         {/* Colunas ocultas continuam montadas: assim esconder e revelar podem animar. */}
-        {COLUMNS.map((column) => (
+        {boardColumns.map((column) => (
           <ColumnSlot key={column.id} shown={show(column.id)}>
             {renderColumn(column)}
           </ColumnSlot>
         ))}
+        {allProjects && <PerRepositoryPlaceholder onChooseProject={chooseProject} />}
       </main>
+    </div>
+  );
+}
+
+// Aviso acima do board, com uma ação: tentar de novo ou escolher um projeto.
+function Notice({ text, action, onAction, busy }: { text: string; action: string; onAction: () => void; busy?: boolean }) {
+  return (
+    <div role="status" className="stroke flex items-center gap-2.5 rounded-[0.625rem] bg-[#FFFBEB] px-3.5 py-2.5 [--stroke:#FDE68A]">
+      <TriangleAlert size={rem(15)} className="shrink-0 text-[#B45309]" />
+      <p className="min-w-0 flex-1 text-[0.8125rem] text-[#92400E]">{text}</p>
+      <button
+        type="button"
+        onClick={onAction}
+        disabled={busy}
+        className="shrink-0 rounded-md px-2 py-1 text-[0.8125rem] font-semibold text-[#92400E] hover:bg-[#FEF3C7] disabled:opacity-60"
+      >
+        {action}
+      </button>
     </div>
   );
 }
